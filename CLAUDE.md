@@ -4,26 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go application called `to_icalendar` that sends reminders to iOS Reminders via the CalDAV protocol. It allows users to create JSON-formatted reminders and upload them directly to Apple's iCloud calendar service.
+This is a Go application called `to_icalendar` that sends reminders to iOS Reminders via the Pushcut service. It allows users to create JSON-formatted reminders and send them to iOS devices where they are automatically converted to iOS Reminders through Shortcuts.
 
 ## Architecture
 
 The application follows a clean modular structure with the following main components:
 
 ### Core Modules
-- **main.go**: CLI entry point handling commands (init, upload, test, list)
-- **internal/caldav**: CalDAV client for communicating with iCloud servers
-- **internal/ical**: iCalendar VTODO component creation and formatting
+- **main.go**: CLI entry point handling commands (init, upload, test)
+- **internal/pushcut**: Pushcut API client for communicating with Pushcut service
 - **internal/config**: Configuration and reminder file management
-- **internal/crypto**: AES-256-GCM encryption for password storage
 - **internal/models**: Data structures for reminders and configuration
 
 ### Key Data Flow
 1. User creates JSON reminder files
 2. ConfigManager loads and validates reminders
-3. ICalCreator converts reminders to iCalendar VTODO format
-4. CalDAVClient uploads to iCloud using HTTP requests
-5. PasswordManager securely handles Apple ID app-specific passwords
+3. PushcutClient sends reminder data to Pushcut API
+4. Pushcut service triggers iOS Shortcuts
+5. iOS Shortcuts create reminders in the iOS Reminders app
 
 ## Common Development Commands
 
@@ -38,17 +36,14 @@ go build -o to_icalendar main.go
 # Initialize configuration files
 ./to_icalendar init
 
-# Upload single reminder
+# Send single reminder
 ./to_icalendar upload config/reminder.json
 
-# Batch upload reminders
+# Batch send reminders
 ./to_icalendar upload reminders/*.json
 
-# Test CalDAV connection
+# Test Pushcut connection
 ./to_icalendar test
-
-# List existing reminders
-./to_icalendar list
 ```
 
 ### Development Setup
@@ -58,9 +53,9 @@ The application requires no external test framework or build tools beyond the st
 
 ### Server Configuration (config/server.yaml)
 ```yaml
-caldav:
-  server_url: "https://caldav.icloud.com"
-  username: "your_apple_id@icloud.com"
+pushcut:
+  api_key: "your_pushcut_api_key"
+  webhook_id: "your_webhook_id"
   timezone: "Asia/Shanghai"
 ```
 
@@ -77,31 +72,40 @@ caldav:
 }
 ```
 
-## Security Implementation
+## Pushcut Integration
 
-- Passwords are encrypted using AES-256-GCM
-- Encryption keys are derived from machine hardware characteristics
-- Encrypted passwords stored in `data/.encrypted_password` with 0600 permissions
-- Sensitive data in memory is cleared after use
-
-## CalDAV Integration
-
-The application communicates with iCloud's CalDAV service using:
-- HTTP PUT requests for uploading VTODO components
-- PROPFIND requests for listing and testing connections
-- Basic authentication with Apple ID and app-specific passwords
-- Custom filename generation based on timestamp and reminder title
+The application communicates with Pushcut's API using:
+- HTTP POST requests with JSON payload
+- Bearer token authentication with API keys
+- Webhook endpoints for triggering iOS Shortcuts
+- Structured data format for iOS Shortcuts consumption
 
 ## Error Handling Patterns
 
 - All functions return explicit errors for debugging
-- Validation occurs at multiple stages (file format, time logic, CalDAV connectivity)
+- Validation occurs at multiple stages (file format, time logic, API connectivity)
 - Graceful degradation when optional features fail
 - Clear error messages with context for troubleshooting
+- HTTP response status checking and error logging
 
 ## Time Zone Handling
 
 - Time zone configuration in server.yaml
-- All internal processing in UTC
-- Proper timezone conversion for user-facing dates
+- All internal processing preserves local timezone context
+- Proper timezone conversion for reminder time calculation
 - Duration parsing for reminder alarms (supports m/h/d suffixes)
+
+## iOS Shortcuts Integration
+
+The application sends data in a format compatible with iOS Shortcuts:
+- Structured JSON with all reminder fields
+- Title, description, date, time, priority, and list information
+- Remind-before duration for alarm settings
+- Cross-platform compatibility for any device that can make HTTP requests
+
+## Security Considerations
+
+- API keys stored in plain text configuration files
+- No sensitive data encryption required (compared to previous CalDAV approach)
+- HTTPS communication with Pushcut API endpoints
+- No password storage or management needed

@@ -27,11 +27,11 @@ type Reminder struct {
 
 // ServerConfig 表示服务器配置
 type ServerConfig struct {
-	CalDAV struct {
-		ServerURL string `yaml:"server_url"` // CalDAV服务器地址
-		Username  string `yaml:"username"`   // Apple ID
-		Timezone  string `yaml:"timezone"`   // 时区设置
-	} `yaml:"caldav"`
+	Pushcut struct {
+		APIKey    string `yaml:"api_key"`     // Pushcut API密钥
+		WebhookID string `yaml:"webhook_id"`  // Pushcut Webhook ID
+		Timezone  string `yaml:"timezone"`    // 时区设置
+	} `yaml:"pushcut"`
 }
 
 // ParsedReminder 表示解析后的提醒事项，包含时间处理

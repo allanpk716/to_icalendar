@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/allanpk716/to_icalendar/internal/caldav"
 	"github.com/allanpk716/to_icalendar/internal/config"
-	"github.com/allanpk716/to_icalendar/internal/crypto"
-	"github.com/allanpk716/to_icalendar/internal/ical"
 	"github.com/allanpk716/to_icalendar/internal/models"
+	"github.com/allanpk716/to_icalendar/internal/pushcut"
 )
 
 const (
@@ -21,7 +18,7 @@ const (
 )
 
 func main() {
-	fmt.Printf("%s v%s - CalDAV提醒事项发送工具\n", appName, version)
+	fmt.Printf("%s v%s - iOS提醒事项发送工具 (Pushcut)\n", appName, version)
 
 	// 解析命令行参数
 	if len(os.Args) < 2 {
@@ -37,8 +34,6 @@ func main() {
 		handleUpload()
 	case "test":
 		handleTest()
-	case "list":
-		handleList()
 	case "help", "-h", "--help":
 		showUsage()
 	default:
@@ -62,7 +57,7 @@ func handleInit() {
 			log.Fatalf("创建服务器配置文件失败: %v", err)
 		}
 		fmt.Printf("✓ 已创建服务器配置文件: %s\n", serverConfigPath)
-		fmt.Println("  请编辑此文件，填入您的Apple ID和CalDAV服务器地址")
+		fmt.Println("  请编辑此文件，填入您的Pushcut API密钥和Webhook ID")
 	} else {
 		fmt.Printf("✓ 服务器配置文件已存在: %s\n", serverConfigPath)
 	}
@@ -82,9 +77,10 @@ func handleInit() {
 
 	fmt.Println("\n初始化完成！")
 	fmt.Println("下一步:")
-	fmt.Println("1. 编辑 config/server.yaml 配置您的Apple ID")
+	fmt.Println("1. 编辑 config/server.yaml 配置您的Pushcut API密钥和Webhook ID")
 	fmt.Println("2. 修改 config/reminder.json 或创建新的提醒事项文件")
-	fmt.Println("3. 运行 'to_icalendar upload config/reminder.json' 上传提醒事项")
+	fmt.Println("3. 在iOS设备上安装Pushcut并配置快捷指令")
+	fmt.Println("4. 运行 'to_icalendar upload config/reminder.json' 发送提醒事项")
 }
 
 // handleUpload 处理上传命令
@@ -102,12 +98,6 @@ func handleUpload() {
 	serverConfig, err := configManager.LoadServerConfig("config/server.yaml")
 	if err != nil {
 		log.Fatalf("加载服务器配置失败: %v", err)
-	}
-
-	// 加载密码
-	password, err := loadPassword(serverConfig.CalDAV.Username)
-	if err != nil {
-		log.Fatalf("密码加载失败: %v", err)
 	}
 
 	// 加载提醒事项
@@ -128,28 +118,27 @@ func handleUpload() {
 		log.Fatalf("加载提醒事项失败: %v", err)
 	}
 
-	fmt.Printf("准备上传 %d 个提醒事项...\n", len(reminders))
+	fmt.Printf("准备发送 %d 个提醒事项到iOS设备...\n", len(reminders))
 
-	// 创建CalDAV客户端
-	caldavClient := caldav.NewCalDAVClient(serverConfig.CalDAV.ServerURL, serverConfig.CalDAV.Username, password)
+	// 创建Pushcut客户端
+	pushcutClient := pushcut.NewPushcutClient(serverConfig.Pushcut.APIKey, serverConfig.Pushcut.WebhookID)
 
 	// 测试连接
-	fmt.Println("测试CalDAV连接...")
-	err = caldavClient.TestConnection()
+	fmt.Println("测试Pushcut连接...")
+	err = pushcutClient.TestConnection()
 	if err != nil {
-		log.Fatalf("CalDAV连接测试失败: %v", err)
+		log.Fatalf("Pushcut连接测试失败: %v", err)
 	}
-	fmt.Println("✓ CalDAV连接成功")
+	fmt.Println("✓ Pushcut连接成功")
 
 	// 处理提醒事项
-	icalCreator := ical.NewICalCreator()
 	successCount := 0
 
 	for i, reminder := range reminders {
 		fmt.Printf("\n处理提醒事项 %d/%d: %s\n", i+1, len(reminders), reminder.Title)
 
 		// 解析时间
-		timezone, err := time.LoadLocation(serverConfig.CalDAV.Timezone)
+		timezone, err := time.LoadLocation(serverConfig.Pushcut.Timezone)
 		if err != nil {
 			fmt.Printf("  ⚠️ 时区加载失败，使用UTC: %v\n", err)
 			timezone = time.UTC
@@ -161,37 +150,23 @@ func handleUpload() {
 			continue
 		}
 
-		// 验证提醒事项
-		err = icalCreator.ValidateReminder(parsedReminder)
+		// 发送到Pushcut
+		err = pushcutClient.UploadReminder(parsedReminder)
 		if err != nil {
-			fmt.Printf("  ❌ 提醒事项验证失败: %v\n", err)
+			fmt.Printf("  ❌ 发送失败: %v\n", err)
 			continue
 		}
 
-		// 创建iCalendar
-		cal, err := icalCreator.CreateVTODO(parsedReminder)
-		if err != nil {
-			fmt.Printf("  ❌ iCalendar创建失败: %v\n", err)
-			continue
-		}
-
-		// 上传到CalDAV服务器
-		err = caldavClient.UploadReminder(cal, parsedReminder)
-		if err != nil {
-			fmt.Printf("  ❌ 上传失败: %v\n", err)
-			continue
-		}
-
-		fmt.Printf("  ✓ 上传成功 (截止时间: %s)\n", parsedReminder.DueTime.Format("2006-01-02 15:04"))
+		fmt.Printf("  ✓ 发送成功 (截止时间: %s)\n", parsedReminder.DueTime.Format("2006-01-02 15:04"))
 		successCount++
 	}
 
-	fmt.Printf("\n上传完成！成功: %d/%d\n", successCount, len(reminders))
+	fmt.Printf("\n发送完成！成功: %d/%d\n", successCount, len(reminders))
 }
 
 // handleTest 处理测试命令
 func handleTest() {
-	fmt.Println("测试CalDAV连接...")
+	fmt.Println("测试Pushcut连接...")
 
 	// 加载服务器配置
 	configManager := config.NewConfigManager()
@@ -200,133 +175,28 @@ func handleTest() {
 		log.Fatalf("加载服务器配置失败: %v", err)
 	}
 
-	// 加载密码
-	password, err := loadPassword(serverConfig.CalDAV.Username)
-	if err != nil {
-		log.Fatalf("密码加载失败: %v", err)
-	}
-
-	// 创建CalDAV客户端
-	caldavClient := caldav.NewCalDAVClient(serverConfig.CalDAV.ServerURL, serverConfig.CalDAV.Username, password)
+	// 创建Pushcut客户端
+	pushcutClient := pushcut.NewPushcutClient(serverConfig.Pushcut.APIKey, serverConfig.Pushcut.WebhookID)
 
 	// 测试连接
-	err = caldavClient.TestConnection()
+	err = pushcutClient.TestConnection()
 	if err != nil {
-		log.Fatalf("CalDAV连接测试失败: %v", err)
+		log.Fatalf("Pushcut连接测试失败: %v", err)
 	}
 
-	fmt.Println("✓ CalDAV连接成功")
+	fmt.Println("✓ Pushcut连接成功")
 
 	// 获取服务器信息
-	serverInfo, err := caldavClient.GetServerInfo()
+	serverInfo, err := pushcutClient.GetServerInfo()
 	if err != nil {
 		fmt.Printf("⚠️ 获取服务器信息失败: %v\n", err)
 	} else {
-		fmt.Printf("✓ 服务器状态: %d\n", serverInfo.StatusCode)
+		fmt.Printf("✓ 服务: %s\n", serverInfo.Service)
+		fmt.Printf("✓ 状态码: %d\n", serverInfo.StatusCode)
 		fmt.Printf("✓ 支持的方法: %s\n", serverInfo.SupportedMethods)
 	}
-
-	// 列出现有提醒事项
-	reminders, err := caldavClient.ListReminders()
-	if err != nil {
-		fmt.Printf("⚠️ 列出提醒事项失败: %v\n", err)
-	} else {
-		fmt.Printf("✓ 现有提醒事项数量: %d\n", len(reminders))
-	}
 }
 
-// handleList 处理列表命令
-func handleList() {
-	fmt.Println("获取提醒事项列表...")
-
-	// 加载服务器配置
-	configManager := config.NewConfigManager()
-	serverConfig, err := configManager.LoadServerConfig("config/server.yaml")
-	if err != nil {
-		log.Fatalf("加载服务器配置失败: %v", err)
-	}
-
-	// 加载密码
-	password, err := loadPassword(serverConfig.CalDAV.Username)
-	if err != nil {
-		log.Fatalf("密码加载失败: %v", err)
-	}
-
-	// 创建CalDAV客户端
-	caldavClient := caldav.NewCalDAVClient(serverConfig.CalDAV.ServerURL, serverConfig.CalDAV.Username, password)
-
-	// 获取提醒事项列表
-	reminders, err := caldavClient.GetRemindersList()
-	if err != nil {
-		log.Fatalf("获取提醒事项列表失败: %v", err)
-	}
-
-	if len(reminders) == 0 {
-		fmt.Println("没有找到提醒事项")
-		return
-	}
-
-	fmt.Printf("找到 %d 个提醒事项:\n\n", len(reminders))
-	for i, reminder := range reminders {
-		fmt.Printf("%d. %s\n", i+1, reminder.Filename)
-		fmt.Printf("   大小: %d 字节\n", reminder.Size)
-		fmt.Printf("   修改时间: %s\n", reminder.ModTime.Format("2006-01-02 15:04:05"))
-		fmt.Println()
-	}
-}
-
-// loadPassword 加载或获取密码
-func loadPassword(username string) (string, error) {
-	dataDir := "data"
-	passwordManager, err := crypto.NewPasswordManager(dataDir)
-	if err != nil {
-		return "", fmt.Errorf("创建密码管理器失败: %w", err)
-	}
-	defer passwordManager.ClearSensitiveData()
-
-	// 检查是否有已保存的密码
-	if passwordManager.HasSavedPassword() {
-		fmt.Println("使用已保存的密码...")
-		password, err := passwordManager.LoadPassword()
-		if err != nil {
-			return "", fmt.Errorf("加载已保存密码失败: %w", err)
-		}
-		return password, nil
-	}
-
-	// 首次运行，需要输入密码
-	fmt.Printf("首次运行，请输入Apple ID '%s' 的APP专用密码:\n", username)
-	fmt.Print("密码: ")
-	password, err := readPassword()
-	if err != nil {
-		return "", fmt.Errorf("读取密码失败: %w", err)
-	}
-
-	if password == "" {
-		return "", fmt.Errorf("密码不能为空")
-	}
-
-	// 保存密码
-	err = passwordManager.SavePassword(password)
-	if err != nil {
-		fmt.Printf("⚠️ 密码保存失败: %v\n", err)
-		fmt.Println("密码将不会被保存，下次运行时需要重新输入")
-	} else {
-		fmt.Println("✓ 密码已加密保存")
-	}
-
-	return password, nil
-}
-
-// readPassword 安全地读取密码
-func readPassword() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-	password, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(password), nil
-}
 
 // showUsage 显示使用说明
 func showUsage() {
@@ -336,22 +206,27 @@ func showUsage() {
 
 命令:
   init                    初始化配置文件
-  upload <file>           上传提醒事项 (支持通配符 *.json)
-  test                    测试CalDAV连接
-  list                    列出所有提醒事项
+  upload <file>           发送提醒事项到iOS (支持通配符 *.json)
+  test                    测试Pushcut连接
   help                    显示此帮助信息
 
 示例:
   %s init                                          # 初始化配置
-  %s upload config/reminder.json                  # 上传单个提醒事项
-  %s upload reminders/*.json                      # 批量上传提醒事项
+  %s upload config/reminder.json                  # 发送单个提醒事项
+  %s upload reminders/*.json                      # 批量发送提醒事项
   %s test                                          # 测试连接
-  %s list                                          # 列出提醒事项
 
 配置文件:
-  config/server.yaml       服务器配置 (Apple ID, CalDAV地址)
+  config/server.yaml       Pushcut配置 (API密钥, Webhook ID)
   config/reminder.json     提醒事项模板
 
+使用说明:
+  1. 在iOS设备上安装Pushcut应用
+  2. 在Pushcut中创建接收提醒事项的快捷指令
+  3. 配置Webhook API端点
+  4. 编辑config/server.yaml填入API密钥和Webhook ID
+  5. 运行upload命令发送提醒事项
+
 更多信息请参考 README.md
-`, appName, appName, appName, appName, appName, appName)
+`, appName, appName, appName, appName, appName)
 }

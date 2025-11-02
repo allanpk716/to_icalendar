@@ -1,15 +1,20 @@
 # to_icalendar
 
-一个通过CalDAV协议发送提醒事项到iOS提醒事项的Go程序。
+一个通过Pushcut发送提醒事项到iOS提醒事项应用的Go程序。
 
 ## 功能特性
 
-- 🚀 通过CalDAV协议直接同步到iOS提醒事项
-- 🔒 APP专用密码安全加密存储
+- 🚀 通过Pushcut直接创建iOS提醒事项
 - 📝 JSON格式配置提醒事项
 - ⏰ 支持自定义提醒时间
-- 📦 支持批量上传提醒事项
+- 📦 支持批量发送提醒事项
 - 🎯 支持设置优先级和分类
+- 🌐 跨平台支持（Windows、Linux、macOS）
+- 🔄 iCloud自动同步到所有iOS设备
+
+## 原理说明
+
+本程序通过Pushcut API将提醒事项数据发送到iOS设备，然后在iOS设备上通过快捷指令自动创建真正的提醒事项。相比CalDAV方案，这种方法能够确保提醒事项出现在iOS Reminders应用中，而不是日历应用中。
 
 ## 安装
 
@@ -24,34 +29,43 @@ go build -o to_icalendar main.go
 
 ## 使用方法
 
-### 1. 初始化配置
+### 1. iOS设备设置
+
+1. **安装Pushcut应用**
+   - 在App Store中搜索并安装"Pushcut"
+   - 打开应用并完成基本设置
+
+2. **创建快捷指令**
+   - 在Pushcut中创建新的快捷指令
+   - 配置快捷指令接收提醒事项数据并创建iOS提醒事项
+   - 获取Webhook API端点信息
+
+3. **获取API密钥**
+   - 在Pushcut设置中找到API密钥
+   - 记录Webhook ID用于配置
+
+### 2. 初始化配置
 
 ```bash
 ./to_icalendar init
 ```
 
 这将创建配置文件模板：
-- `config/server.yaml` - 服务器配置
+- `config/server.yaml` - Pushcut配置
 - `config/reminder.json` - 提醒事项模板
 
-### 2. 配置Apple ID
+### 3. 配置Pushcut
 
 编辑 `config/server.yaml`：
 
 ```yaml
-caldav:
-  server_url: "https://caldav.icloud.com"
-  username: "your_apple_id@icloud.com"
+pushcut:
+  api_key: "your_pushcut_api_key"
+  webhook_id: "your_webhook_id"
   timezone: "Asia/Shanghai"
 ```
 
-**重要**: 您需要生成Apple ID的APP专用密码：
-1. 访问 https://appleid.apple.com/
-2. 登录您的Apple ID
-3. 选择"安全性" → "APP专用密码"
-4. 生成新的APP专用密码
-
-### 3. 创建提醒事项
+### 4. 创建提醒事项
 
 编辑提醒事项JSON文件：
 
@@ -79,29 +93,47 @@ caldav:
 | `priority` | string | ❌ | 优先级: low/medium/high |
 | `list` | string | ❌ | 提醒事项列表名称 |
 
-### 4. 上传提醒事项
+### 5. 发送提醒事项
 
 ```bash
-# 上传单个提醒事项
+# 发送单个提醒事项
 ./to_icalendar upload config/reminder.json
 
-# 批量上传提醒事项
+# 批量发送提醒事项
 ./to_icalendar upload reminders/*.json
 ```
 
-首次运行时，程序会提示您输入APP专用密码，并加密保存供后续使用。
-
-### 5. 其他命令
+### 6. 其他命令
 
 ```bash
-# 测试CalDAV连接
+# 测试Pushcut连接
 ./to_icalendar test
-
-# 列出所有提醒事项
-./to_icalendar list
 
 # 显示帮助
 ./to_icalendar help
+```
+
+## iOS快捷指令配置
+
+在Pushcut中创建快捷指令时，确保快捷指令能够：
+
+1. **接收输入数据**：配置快捷指令接收HTTP请求中的JSON数据
+2. **解析提醒信息**：从JSON中提取title、description、date、time等字段
+3. **创建提醒事项**：使用"添加新提醒事项"动作创建提醒
+4. **设置提醒时间**：根据date和time字段设置提醒时间
+5. **配置优先级**：根据priority字段设置提醒优先级
+
+快捷指令示例流程：
+```
+收到Webhook请求
+    ↓
+解析JSON数据
+    ↓
+提取提醒信息
+    ↓
+创建iOS提醒事项
+    ↓
+设置提醒时间和属性
 ```
 
 ## 提醒时间格式
@@ -115,35 +147,31 @@ caldav:
 
 ## 优先级说明
 
-- `high` - 高优先级 (iCalendar值: 1)
-- `medium` - 中等优先级 (iCalendar值: 5) - 默认
-- `low` - 低优先级 (iCalendar值: 9)
-
-## 安全性
-
-- APP专用密码使用AES-256-GCM算法加密存储
-- 加密密钥基于机器硬件特征生成
-- 密码文件仅当前用户可读 (权限: 0600)
-- 内存中的敏感数据使用后立即清零
+- `high` - 高优先级
+- `medium` - 中等优先级 - 默认
+- `low` - 低优先级
 
 ## 故障排除
 
 ### 连接失败
 
-1. 确认Apple ID和APP专用密码正确
+1. 确认Pushcut API密钥和Webhook ID正确
 2. 检查网络连接
-3. 确认已启用iCloud的提醒事项同步
+3. 确认iOS设备上的Pushcut应用正常运行
+4. 检查快捷指令配置是否正确
 
-### 密码问题
+### 提醒事项未创建
 
-如果忘记密码或需要更换Apple ID，删除 `data/.encrypted_password` 文件，程序会在下次运行时重新提示输入密码。
+1. 检查快捷指令是否正确配置
+2. 确认iOS设备上的提醒事项应用权限
+3. 验证JSON数据格式是否正确
+4. 检查提醒时间是否在未来
 
-### 时间问题
+### 同步问题
 
-确保：
-1. 日期格式为 `YYYY-MM-DD`
-2. 时间格式为 `HH:MM` (24小时制)
-3. 提醒时间在未来
+1. 确认iCloud提醒事项同步已启用
+2. 检查iOS设备网络连接
+3. 重启iOS设备上的提醒事项应用
 
 ## 示例
 
@@ -173,6 +201,22 @@ caldav:
   "priority": "medium",
   "list": "生活"
 }
+```
+
+## 技术架构
+
+```
+Go程序 (Windows/Linux/macOS)
+    ↓ HTTP POST
+Pushcut API (云端服务)
+    ↓ 推送通知
+Pushcut应用 (iOS设备)
+    ↓ 自动触发
+iOS快捷指令
+    ↓ 创建提醒
+iOS Reminders应用
+    ↓ iCloud同步
+所有iOS设备
 ```
 
 ## 许可证

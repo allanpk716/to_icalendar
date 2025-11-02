@@ -40,14 +40,14 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 	}
 
 	// 验证必要字段
-	if config.CalDAV.ServerURL == "" {
-		return nil, fmt.Errorf("server_url is required in server config")
+	if config.Pushcut.APIKey == "" {
+		return nil, fmt.Errorf("api_key is required in server config")
 	}
-	if config.CalDAV.Username == "" {
-		return nil, fmt.Errorf("username is required in server config")
+	if config.Pushcut.WebhookID == "" {
+		return nil, fmt.Errorf("webhook_id is required in server config")
 	}
-	if config.CalDAV.Timezone == "" {
-		config.CalDAV.Timezone = "UTC" // 默认UTC时区
+	if config.Pushcut.Timezone == "" {
+		config.Pushcut.Timezone = "UTC" // 默认UTC时区
 	}
 
 	return &config, nil
@@ -136,9 +136,9 @@ func (cm *ConfigManager) LoadRemindersFromPattern(pattern string) ([]*models.Rem
 // CreateServerConfigTemplate 创建服务器配置模板文件
 func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	template := models.ServerConfig{}
-	template.CalDAV.ServerURL = "https://caldav.icloud.com"
-	template.CalDAV.Username = "your_apple_id@icloud.com"
-	template.CalDAV.Timezone = "Asia/Shanghai"
+	template.Pushcut.APIKey = "your_pushcut_api_key"
+	template.Pushcut.WebhookID = "your_webhook_id"
+	template.Pushcut.Timezone = "Asia/Shanghai"
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)
