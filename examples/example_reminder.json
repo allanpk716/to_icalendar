@@ -1,0 +1,9 @@
+{
+  "title": "项目会议",
+  "description": "讨论新产品功能规划和时间安排",
+  "date": "2025-11-05",
+  "time": "15:00",
+  "remind_before": "30m",
+  "priority": "high",
+  "list": "工作"
+}
