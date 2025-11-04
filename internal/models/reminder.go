@@ -5,16 +5,17 @@ import (
 	"time"
 )
 
-// Priority 定义提醒事项优先级
+// Priority defines the priority level for reminders.
 type Priority string
 
 const (
-	PriorityLow    Priority = "low"
-	PriorityMedium Priority = "medium"
-	PriorityHigh   Priority = "high"
+	PriorityLow    Priority = "low"    // Low priority
+	PriorityMedium Priority = "medium" // Medium priority (default)
+	PriorityHigh   Priority = "high"   // High priority
 )
 
-// Reminder 表示一个提醒事项
+// Reminder represents a reminder task with title, description, timing, and priority.
+// It is used to serialize/deserialize reminder data from JSON configuration files.
 type Reminder struct {
 	Title        string   `json:"title"`                   // 提醒标题（必填）
 	Description  string   `json:"description,omitempty"`   // 备注信息（可选）
@@ -25,13 +26,9 @@ type Reminder struct {
 	List         string   `json:"list,omitempty"`          // 提醒事项列表名称
 }
 
-// ServerConfig 表示服务器配置
+// ServerConfig contains configuration for Microsoft Todo integration.
+// It includes Azure AD credentials and timezone settings for proper time handling.
 type ServerConfig struct {
-	Pushcut struct {
-		APIKey    string `yaml:"api_key"`    // Pushcut API密钥
-		WebhookID string `yaml:"webhook_id"` // Pushcut Webhook ID
-		Timezone  string `yaml:"timezone"`   // 时区设置
-	} `yaml:"pushcut"`
 	MicrosoftTodo struct {
 		TenantID     string `yaml:"tenant_id"`     // Microsoft Azure 租户ID
 		ClientID     string `yaml:"client_id"`     // 应用程序客户端ID
@@ -40,7 +37,8 @@ type ServerConfig struct {
 	} `yaml:"microsoft_todo"`
 }
 
-// ParsedReminder 表示解析后的提醒事项，包含时间处理
+// ParsedReminder represents a reminder with parsed time information.
+// It includes the original reminder data, calculated due/alarm times, and formatted strings.
 type ParsedReminder struct {
 	Original      Reminder       // 原始数据
 	DueTime       time.Time      // 截止时间
@@ -54,7 +52,9 @@ type ParsedReminder struct {
 	RemindTimeStr string         // 格式化的提醒时间字符串
 }
 
-// ParseReminderTime 解析提醒事项的时间信息
+// ParseReminderTime parses time information from a reminder and creates a ParsedReminder.
+// It converts date/time strings, calculates alarm times, and formats priority values.
+// Returns a ParsedReminder with calculated times and formatted strings, or an error if parsing fails.
 func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedReminder, error) {
 	// 解析日期和时间
 	dateTimeStr := reminder.Date + " " + reminder.Time
@@ -113,7 +113,9 @@ func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedRemin
 	}, nil
 }
 
-// parseDuration 解析持续时间字符串并计算提醒时间
+// parseDuration parses a duration string and calculates the reminder time from a given time.
+// Supports formats like "15m", "1h", "2d" for minutes, hours, and days respectively.
+// Returns the calculated reminder time, or an error if the duration format is invalid.
 func parseDuration(from time.Time, duration string) (time.Time, error) {
 	var d time.Duration
 	var err error

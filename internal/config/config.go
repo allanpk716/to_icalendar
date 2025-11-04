@@ -39,26 +39,16 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		return nil, fmt.Errorf("failed to parse server config file: %w", err)
 	}
 
-	// 验证配置完整性 - 至少需要一种服务配置
-	hasPushcut := config.Pushcut.APIKey != "" && config.Pushcut.WebhookID != ""
+	// 验证配置完整性 - 需要 Microsoft Todo 配置
 	hasMicrosoftTodo := config.MicrosoftTodo.TenantID != "" && config.MicrosoftTodo.ClientID != "" && config.MicrosoftTodo.ClientSecret != ""
 
-	if !hasPushcut && !hasMicrosoftTodo {
-		return nil, fmt.Errorf("either pushcut configuration or microsoft_todo configuration is required")
+	if !hasMicrosoftTodo {
+		return nil, fmt.Errorf("microsoft_todo configuration is required")
 	}
 
-	// 验证 Pushcut 配置（如果存在）
-	if hasPushcut {
-		if config.Pushcut.Timezone == "" {
-			config.Pushcut.Timezone = "UTC" // 默认UTC时区
-		}
-	}
-
-	// 验证 Microsoft Todo 配置（如果存在）
-	if hasMicrosoftTodo {
-		if config.MicrosoftTodo.Timezone == "" {
-			config.MicrosoftTodo.Timezone = "UTC" // 默认UTC时区
-		}
+	// 验证 Microsoft Todo 配置
+	if config.MicrosoftTodo.Timezone == "" {
+		config.MicrosoftTodo.Timezone = "UTC" // 默认UTC时区
 	}
 
 	return &config, nil
@@ -148,12 +138,7 @@ func (cm *ConfigManager) LoadRemindersFromPattern(pattern string) ([]*models.Rem
 func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	template := models.ServerConfig{}
 
-	// Pushcut 配置（可选）
-	template.Pushcut.APIKey = "your_pushcut_api_key"
-	template.Pushcut.WebhookID = "your_webhook_id"
-	template.Pushcut.Timezone = "Asia/Shanghai"
-
-	// Microsoft Todo 配置（可选）
+	// Microsoft Todo 配置
 	template.MicrosoftTodo.TenantID = "YOUR_TENANT_ID"
 	template.MicrosoftTodo.ClientID = "YOUR_CLIENT_ID"
 	template.MicrosoftTodo.ClientSecret = "YOUR_CLIENT_SECRET"
@@ -165,14 +150,14 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 		return fmt.Errorf("failed to marshal server config template: %w", err)
 	}
 
-	// 确保目录存在
+	// Ensure directory exists with secure permissions
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// 写入文件
-	err = os.WriteFile(configPath, data, 0644)
+	// Write file with restricted permissions (owner read/write only)
+	err = os.WriteFile(configPath, data, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write server config template: %w", err)
 	}
@@ -198,13 +183,13 @@ func (cm *ConfigManager) CreateReminderTemplate(reminderPath string) error {
 		return fmt.Errorf("failed to marshal reminder template: %w", err)
 	}
 
-	// 确保目录存在
+	// Ensure directory exists
 	dir := filepath.Dir(reminderPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create reminder directory: %w", err)
 	}
 
-	// 写入文件
+	// Write file with standard permissions (reminder files are not sensitive)
 	err = os.WriteFile(reminderPath, data, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write reminder template: %w", err)

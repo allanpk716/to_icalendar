@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go application called `to_icalendar` that sends reminders to iOS Reminders via the Pushcut service. It allows users to create JSON-formatted reminders and send them to iOS devices where they are automatically converted to iOS Reminders through Shortcuts.
+This is a Go application called `to_icalendar` that sends reminders to Microsoft Todo. It allows users to create JSON-formatted reminders and send them to Microsoft Todo via the Microsoft Graph API.
 
 ## Architecture
 
@@ -12,16 +12,15 @@ The application follows a clean modular structure with the following main compon
 
 ### Core Modules
 - **main.go**: CLI entry point handling commands (init, upload, test)
-- **internal/pushcut**: Pushcut API client for communicating with Pushcut service
+- **internal/microsoft-todo**: Microsoft Todo API client for communicating with Microsoft Graph service
 - **internal/config**: Configuration and reminder file management
 - **internal/models**: Data structures for reminders and configuration
 
 ### Key Data Flow
 1. User creates JSON reminder files
 2. ConfigManager loads and validates reminders
-3. PushcutClient sends reminder data to Pushcut API
-4. Pushcut service triggers iOS Shortcuts
-5. iOS Shortcuts create reminders in the iOS Reminders app
+3. Microsoft Todo client sends reminder data to Microsoft Graph API
+4. Microsoft Graph API creates tasks in Microsoft Todo
 
 ## Common Development Commands
 
@@ -42,7 +41,7 @@ go build -o to_icalendar main.go
 # Batch send reminders
 ./to_icalendar upload reminders/*.json
 
-# Test Pushcut connection
+# Test Microsoft Todo connection
 ./to_icalendar test
 ```
 
@@ -53,9 +52,10 @@ The application requires no external test framework or build tools beyond the st
 
 ### Server Configuration (config/server.yaml)
 ```yaml
-pushcut:
-  api_key: "your_pushcut_api_key"
-  webhook_id: "your_webhook_id"
+microsoft_todo:
+  tenant_id: "YOUR_TENANT_ID"
+  client_id: "YOUR_CLIENT_ID"
+  client_secret: "YOUR_CLIENT_SECRET"
   timezone: "Asia/Shanghai"
 ```
 
@@ -72,13 +72,13 @@ pushcut:
 }
 ```
 
-## Pushcut Integration
+## Microsoft Todo Integration
 
-The application communicates with Pushcut's API using:
+The application communicates with Microsoft Graph API using:
+- OAuth 2.0 authentication with Azure AD
 - HTTP POST requests with JSON payload
-- Bearer token authentication with API keys
-- Webhook endpoints for triggering iOS Shortcuts
-- Structured data format for iOS Shortcuts consumption
+- Structured data format for Microsoft Todo task creation
+- Tasks.ReadWrite.All API permissions for task management
 
 ## Error Handling Patterns
 
@@ -95,17 +95,18 @@ The application communicates with Pushcut's API using:
 - Proper timezone conversion for reminder time calculation
 - Duration parsing for reminder alarms (supports m/h/d suffixes)
 
-## iOS Shortcuts Integration
+## Microsoft Todo Integration Details
 
-The application sends data in a format compatible with iOS Shortcuts:
+The application sends data in a format compatible with Microsoft Todo:
 - Structured JSON with all reminder fields
 - Title, description, date, time, priority, and list information
 - Remind-before duration for alarm settings
-- Cross-platform compatibility for any device that can make HTTP requests
+- Cross-platform compatibility for any device that can access Microsoft Todo
 
 ## Security Considerations
 
-- API keys stored in plain text configuration files
-- No sensitive data encryption required (compared to previous CalDAV approach)
-- HTTPS communication with Pushcut API endpoints
+- Azure AD credentials stored in plain text configuration files
+- OAuth 2.0 authentication with secure token management
+- HTTPS communication with Microsoft Graph API endpoints
 - No password storage or management needed
+- Requires Azure AD application registration and API permissions

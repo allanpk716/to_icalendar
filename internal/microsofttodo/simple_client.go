@@ -1,4 +1,4 @@
-package microsoft_todo
+package microsofttodo
 
 import (
 	"fmt"
