@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "mcp__web-search-prime__webSearchPrime",
-      "WebFetch(domain:www.busymac.com)"
+      "WebFetch(domain:www.busymac.com)",
+      "Bash(go mod tidy:*)"
     ],
     "deny": [],
     "ask": []

@@ -16,31 +16,42 @@ const (
 
 // Reminder 表示一个提醒事项
 type Reminder struct {
-	Title         string    `json:"title"`                     // 提醒标题（必填）
-	Description   string    `json:"description,omitempty"`    // 备注信息（可选）
-	Date          string    `json:"date"`                      // 日期 YYYY-MM-DD（必填）
-	Time          string    `json:"time"`                      // 时间 HH:MM（必填）
-	RemindBefore  string    `json:"remind_before,omitempty"`   // 提前提醒时间（如 15m, 1h, 1d）
-	Priority      Priority  `json:"priority,omitempty"`        // 优先级 low/medium/high
-	List          string    `json:"list,omitempty"`            // 提醒事项列表名称
+	Title        string   `json:"title"`                   // 提醒标题（必填）
+	Description  string   `json:"description,omitempty"`   // 备注信息（可选）
+	Date         string   `json:"date"`                    // 日期 YYYY-MM-DD（必填）
+	Time         string   `json:"time"`                    // 时间 HH:MM（必填）
+	RemindBefore string   `json:"remind_before,omitempty"` // 提前提醒时间（如 15m, 1h, 1d）
+	Priority     Priority `json:"priority,omitempty"`      // 优先级 low/medium/high
+	List         string   `json:"list,omitempty"`          // 提醒事项列表名称
 }
 
 // ServerConfig 表示服务器配置
 type ServerConfig struct {
 	Pushcut struct {
-		APIKey    string `yaml:"api_key"`     // Pushcut API密钥
-		WebhookID string `yaml:"webhook_id"`  // Pushcut Webhook ID
-		Timezone  string `yaml:"timezone"`    // 时区设置
+		APIKey    string `yaml:"api_key"`    // Pushcut API密钥
+		WebhookID string `yaml:"webhook_id"` // Pushcut Webhook ID
+		Timezone  string `yaml:"timezone"`   // 时区设置
 	} `yaml:"pushcut"`
+	MicrosoftTodo struct {
+		TenantID     string `yaml:"tenant_id"`     // Microsoft Azure 租户ID
+		ClientID     string `yaml:"client_id"`     // 应用程序客户端ID
+		ClientSecret string `yaml:"client_secret"` // 客户端密钥
+		Timezone     string `yaml:"timezone"`      // 时区设置
+	} `yaml:"microsoft_todo"`
 }
 
 // ParsedReminder 表示解析后的提醒事项，包含时间处理
 type ParsedReminder struct {
-	Original      Reminder          // 原始数据
-	DueTime       time.Time         // 截止时间
-	AlarmTime     time.Time         // 提醒时间
-	PriorityValue int               // iCalendar优先级值（1-9）
-	Timezone      *time.Location    // 时区信息
+	Original      Reminder       // 原始数据
+	DueTime       time.Time      // 截止时间
+	AlarmTime     time.Time      // 提醒时间
+	PriorityValue int            // iCalendar优先级值（1-9）
+	Priority      int            // 原始优先级值（用于 Microsoft Todo）
+	Timezone      *time.Location // 时区信息
+	List          string         // 任务列表名称
+	Description   string         // 描述信息
+	DueTimeStr    string         // 格式化的截止时间字符串
+	RemindTimeStr string         // 格式化的提醒时间字符串
 }
 
 // ParseReminderTime 解析提醒事项的时间信息
@@ -65,27 +76,40 @@ func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedRemin
 
 	// 转换优先级
 	priorityValue := 5 // 默认中等优先级
+	priority := 5      // Microsoft Todo 优先级
 	switch reminder.Priority {
 	case PriorityLow:
 		priorityValue = 9
+		priority = 1 // Microsoft Todo 低优先级
 	case PriorityHigh:
 		priorityValue = 1
+		priority = 9 // Microsoft Todo 高优先级
 	case PriorityMedium:
 		priorityValue = 5
+		priority = 5 // Microsoft Todo 中等优先级
 	}
 
 	// 设置默认列表名称
 	list := reminder.List
 	if list == "" {
-		list = "提醒事项"
+		list = "Default" // Microsoft Todo 默认列表名称
 	}
+
+	// 格式化时间字符串
+	dueTimeStr := dueTime.Format("2006-01-02T15:04:05")
+	remindTimeStr := alarmTime.Format("2006-01-02T15:04:05")
 
 	return &ParsedReminder{
 		Original:      reminder,
 		DueTime:       dueTime,
 		AlarmTime:     alarmTime,
 		PriorityValue: priorityValue,
+		Priority:      priority,
 		Timezone:      timezone,
+		List:          list,
+		Description:   reminder.Description,
+		DueTimeStr:    dueTimeStr,
+		RemindTimeStr: remindTimeStr,
 	}, nil
 }
 

@@ -39,15 +39,26 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		return nil, fmt.Errorf("failed to parse server config file: %w", err)
 	}
 
-	// 验证必要字段
-	if config.Pushcut.APIKey == "" {
-		return nil, fmt.Errorf("api_key is required in server config")
+	// 验证配置完整性 - 至少需要一种服务配置
+	hasPushcut := config.Pushcut.APIKey != "" && config.Pushcut.WebhookID != ""
+	hasMicrosoftTodo := config.MicrosoftTodo.TenantID != "" && config.MicrosoftTodo.ClientID != "" && config.MicrosoftTodo.ClientSecret != ""
+
+	if !hasPushcut && !hasMicrosoftTodo {
+		return nil, fmt.Errorf("either pushcut configuration or microsoft_todo configuration is required")
 	}
-	if config.Pushcut.WebhookID == "" {
-		return nil, fmt.Errorf("webhook_id is required in server config")
+
+	// 验证 Pushcut 配置（如果存在）
+	if hasPushcut {
+		if config.Pushcut.Timezone == "" {
+			config.Pushcut.Timezone = "UTC" // 默认UTC时区
+		}
 	}
-	if config.Pushcut.Timezone == "" {
-		config.Pushcut.Timezone = "UTC" // 默认UTC时区
+
+	// 验证 Microsoft Todo 配置（如果存在）
+	if hasMicrosoftTodo {
+		if config.MicrosoftTodo.Timezone == "" {
+			config.MicrosoftTodo.Timezone = "UTC" // 默认UTC时区
+		}
 	}
 
 	return &config, nil
@@ -136,9 +147,17 @@ func (cm *ConfigManager) LoadRemindersFromPattern(pattern string) ([]*models.Rem
 // CreateServerConfigTemplate 创建服务器配置模板文件
 func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	template := models.ServerConfig{}
+
+	// Pushcut 配置（可选）
 	template.Pushcut.APIKey = "your_pushcut_api_key"
 	template.Pushcut.WebhookID = "your_webhook_id"
 	template.Pushcut.Timezone = "Asia/Shanghai"
+
+	// Microsoft Todo 配置（可选）
+	template.MicrosoftTodo.TenantID = "YOUR_TENANT_ID"
+	template.MicrosoftTodo.ClientID = "YOUR_CLIENT_ID"
+	template.MicrosoftTodo.ClientSecret = "YOUR_CLIENT_SECRET"
+	template.MicrosoftTodo.Timezone = "Asia/Shanghai"
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)
