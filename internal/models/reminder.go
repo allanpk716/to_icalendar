@@ -33,6 +33,7 @@ type ServerConfig struct {
 		TenantID     string `yaml:"tenant_id"`     // Microsoft Azure 租户ID
 		ClientID     string `yaml:"client_id"`     // 应用程序客户端ID
 		ClientSecret string `yaml:"client_secret"` // 客户端密钥
+		UserEmail    string `yaml:"user_email"`    // 目标用户邮箱（用于应用程序权限）
 		Timezone     string `yaml:"timezone"`      // 时区设置
 	} `yaml:"microsoft_todo"`
 }

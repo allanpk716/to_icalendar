@@ -3,7 +3,8 @@
     "allow": [
       "mcp__web-search-prime__webSearchPrime",
       "WebFetch(domain:www.busymac.com)",
-      "Bash(go mod tidy:*)"
+      "Bash(go mod tidy:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

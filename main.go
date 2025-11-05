@@ -48,10 +48,10 @@ func main() {
 }
 
 // validateMicrosoftTodoConfig validates Microsoft Todo configuration by checking
-// if all required fields (TenantID, ClientID, ClientSecret) are present.
+// if all required fields (TenantID, ClientID, ClientSecret, UserEmail) are present.
 // Returns true if configuration is valid, false otherwise.
 func validateMicrosoftTodoConfig(config *models.ServerConfig) bool {
-	return config.MicrosoftTodo.TenantID != "" && config.MicrosoftTodo.ClientID != "" && config.MicrosoftTodo.ClientSecret != ""
+	return config.MicrosoftTodo.TenantID != "" && config.MicrosoftTodo.ClientID != "" && config.MicrosoftTodo.ClientSecret != "" && config.MicrosoftTodo.UserEmail != ""
 }
 
 // handleInit handles the init command by creating configuration template files.
@@ -179,6 +179,7 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 		serverConfig.MicrosoftTodo.TenantID,
 		serverConfig.MicrosoftTodo.ClientID,
 		serverConfig.MicrosoftTodo.ClientSecret,
+		serverConfig.MicrosoftTodo.UserEmail,
 	)
 	if err != nil {
 		log.Fatalf("Failed to create Microsoft Todo client: %v", err)
@@ -238,8 +239,20 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 			continue
 		}
 
+		// Get or create task list
+		listName := parsedReminder.Original.List
+		if listName == "" {
+			listName = "Default" // 使用默认列表名称
+		}
+
+		listID, err := todoClient.GetOrCreateTaskList(listName)
+		if err != nil {
+			fmt.Printf("  ❌ Failed to get or create task list '%s': %v\n", listName, err)
+			continue
+		}
+
 		// Send to Microsoft Todo
-		err = todoClient.CreateTask(parsedReminder.Original.Title, parsedReminder.Description)
+		err = todoClient.CreateTask(parsedReminder.Original.Title, parsedReminder.Description, listID)
 		if err != nil {
 			fmt.Printf("  ❌ Failed to create task: %v\n", err)
 			continue
@@ -282,6 +295,7 @@ func testMicrosoftTodoConnection(serverConfig *models.ServerConfig) {
 		serverConfig.MicrosoftTodo.TenantID,
 		serverConfig.MicrosoftTodo.ClientID,
 		serverConfig.MicrosoftTodo.ClientSecret,
+		serverConfig.MicrosoftTodo.UserEmail,
 	)
 	if err != nil {
 		log.Fatalf("Failed to create Microsoft Todo client: %v", err)
