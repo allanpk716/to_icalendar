@@ -118,20 +118,32 @@ microsoft_todo:
 
 1. 访问 [Azure Portal](https://portal.azure.com)
 2. 转到 **Azure Active Directory** → **应用注册** → **新注册**
-3. 输入应用程序名称（如 "to_icalendar"）
-4. 选择支持的账户类型（通常选择"仅此组织目录中的账户"）
-5. 点击 **注册**
+3. 填写应用程序信息：
+   - **Name**: `to_icalendar Personal`
+   - **Supported account types**: `Accounts in any organizational directory (Any Azure AD directory - Multitenant) and personal Microsoft accounts`
+   - **Redirect URI**: `http://localhost:8080/callback`
+4. 点击 **注册**
 
-### 2. 配置 API 权限
+### 2. 配置身份验证
+
+1. 在应用注册页面，转到 **身份验证**
+2. 在 **高级设置** 中找到 **允许公共客户端流**
+3. 将 **允许公共客户端流** 设置为 **是**
+4. 点击 **保存**
+
+### 3. 配置 API 权限
 
 1. 在应用注册页面，转到 **API 权限**
 2. 点击 **添加权限** → **Microsoft Graph**
-3. 选择 **应用程序权限**
-4. 搜索并添加 `Tasks.ReadWrite.All` 权限
+3. 选择 **委托的权限**
+4. 搜索并添加以下权限：
+   - `Tasks.ReadWrite` - 读写Microsoft Todo任务
+   - `User.Read` - 读取用户基本信息
+   - `offline_access` - 获取刷新token以实现长期访问
 5. 点击 **添加权限**
 6. 点击 **授予管理员同意**（需要管理员权限）
 
-### 3. 创建客户端密钥
+### 4. 创建客户端密钥
 
 1. 转到 **证书和密钥** 页面
 2. 点击 **新客户端密钥**
@@ -140,13 +152,43 @@ microsoft_todo:
 5. 点击 **添加**
 6. **重要**：立即复制密钥值，此值只显示一次
 
-### 4. 获取必要信息
+### 5. 获取必要信息
 
 在应用注册的 **概述** 页面找到：
 - **应用程序（客户端）ID** → 对应配置文件中的 `client_id`
-- **目录（租户）ID** → 对应配置文件中的 `tenant_id`
+- **目录（租户）ID** → 对应配置文件中的 `tenant_id` # 建议使用 consumers
 
-客户端密钥值对应配置文件中的 `client_secret`。
+### 6. 配置应用程序
+
+将获取的信息填入 `config/server.yaml`：
+
+```yaml
+microsoft_todo:
+  tenant_id: "consumers"  # 个人Microsoft账户使用consumers，建议使用这个即可
+  client_id: "您的应用程序客户端ID"
+  client_secret: "您的客户端密钥"
+  user_email: "您的个人Microsoft邮箱"
+  timezone: "Asia/Shanghai"
+```
+
+### 7. 验证登录
+
+运行以下命令进行交互式验证登录：
+
+```bash
+./to_icalendar test
+```
+
+程序会：
+1. 自动打开浏览器进行Microsoft账户登录
+2. 授权应用程序访问Microsoft Todo
+3. 缓存访问令牌和刷新令牌以实现长期自动访问
+4. 显示连接成功消息
+
+**重要说明**：
+- 首次登录后，程序会缓存令牌，90天内无需重复登录
+- 令牌会自动刷新，提供无缝的长期访问体验
+- 如果缓存过期，只需重新运行 `test` 命令重新登录
 
 ## 📅 时间格式说明
 
