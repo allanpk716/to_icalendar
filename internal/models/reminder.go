@@ -26,8 +26,8 @@ type Reminder struct {
 	List         string   `json:"list,omitempty"`          // 提醒事项列表名称
 }
 
-// ServerConfig contains configuration for Microsoft Todo integration.
-// It includes Azure AD credentials and timezone settings for proper time handling.
+// ServerConfig contains configuration for Microsoft Todo and Dify integration.
+// It includes Azure AD credentials, timezone settings, and Dify API configuration.
 type ServerConfig struct {
 	MicrosoftTodo struct {
 		TenantID     string `yaml:"tenant_id"`     // Microsoft Azure 租户ID
@@ -36,6 +36,7 @@ type ServerConfig struct {
 		UserEmail    string `yaml:"user_email"`    // 目标用户邮箱（用于应用程序权限）
 		Timezone     string `yaml:"timezone"`      // 时区设置
 	} `yaml:"microsoft_todo"`
+	Dify DifyConfig `yaml:"dify"`
 }
 
 // ParsedReminder represents a reminder with parsed time information.
