@@ -251,14 +251,24 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 			continue
 		}
 
-		// Send to Microsoft Todo
-		err = todoClient.CreateTask(parsedReminder.Original.Title, parsedReminder.Description, listID)
+		// Send to Microsoft Todo with full details
+		err = todoClient.CreateTaskWithDetails(
+			parsedReminder.Original.Title,
+			parsedReminder.Description,
+			listID,
+			parsedReminder.DueTime,
+			parsedReminder.AlarmTime,
+			parsedReminder.Priority,
+			serverConfig.MicrosoftTodo.Timezone,
+		)
 		if err != nil {
 			fmt.Printf("  ❌ Failed to create task: %v\n", err)
 			continue
 		}
 
-		fmt.Printf("  ✓ Created successfully (due: %s)\n", parsedReminder.DueTime.Format("2006-01-02 15:04"))
+		fmt.Printf("  ✓ Created successfully (due: %s, reminder: %s)\n",
+			parsedReminder.DueTime.Format("2006-01-02 15:04"),
+			parsedReminder.AlarmTime.Format("2006-01-02 15:04"))
 		successCount++
 	}
 

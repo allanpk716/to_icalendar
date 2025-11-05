@@ -557,11 +557,17 @@ func (c *SimpleTodoClient) GetOrCreateTaskList(listName string) (string, error) 
 	return createdList.ID, nil
 }
 
-// CreateTask 创建任务
-func (c *SimpleTodoClient) CreateTask(title, description, listID string) error {
+// CreateTaskWithDetails 创建带详细信息的任务
+func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID string, dueTime, reminderTime time.Time, importance int, timezone string) error {
 	log.Printf("Creating task: %s", title)
 	if description != "" {
 		log.Printf("Task description: %s", description)
+	}
+	if !dueTime.IsZero() {
+		log.Printf("Due time: %s", dueTime.Format("2006-01-02 15:04"))
+	}
+	if !reminderTime.IsZero() {
+		log.Printf("Reminder time: %s", reminderTime.Format("2006-01-02 15:04"))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -579,6 +585,34 @@ func (c *SimpleTodoClient) CreateTask(title, description, listID string) error {
 		}
 	}
 
+	// 设置截止时间
+	if !dueTime.IsZero() {
+		newTask["dueDateTime"] = map[string]interface{}{
+			"dateTime": dueTime.Format("2006-01-02T15:04:05"),
+			"timeZone": timezone,
+		}
+	}
+
+	// 设置提醒时间
+	if !reminderTime.IsZero() {
+		newTask["reminderDateTime"] = map[string]interface{}{
+			"dateTime": reminderTime.Format("2006-01-02T15:04:05"),
+			"timeZone": timezone,
+		}
+	}
+
+	// 设置重要性
+	switch importance {
+	case 1: // 低优先级
+		newTask["importance"] = "low"
+	case 5: // 中等优先级
+		newTask["importance"] = "normal"
+	case 9: // 高优先级
+		newTask["importance"] = "high"
+	default:
+		newTask["importance"] = "normal"
+	}
+
 	// 发送创建任务请求
 	endpoint := fmt.Sprintf("/me/todo/lists/%s/tasks", listID)
 	resp, err := c.makeAPIRequest(ctx, "POST", endpoint, newTask)
@@ -588,7 +622,11 @@ func (c *SimpleTodoClient) CreateTask(title, description, listID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("failed to create task with status: %d", resp.StatusCode)
+		// 读取错误响应以获取更多调试信息
+		body, _ := io.ReadAll(resp.Body)
+		var errorResp map[string]interface{}
+		json.Unmarshal(body, &errorResp)
+		return fmt.Errorf("failed to create task with status: %d, error: %+v", resp.StatusCode, errorResp)
 	}
 
 	// 解析创建的任务响应
@@ -602,6 +640,11 @@ func (c *SimpleTodoClient) CreateTask(title, description, listID string) error {
 
 	log.Printf("Successfully created task '%s' with ID: %s", title, createdTask.ID)
 	return nil
+}
+
+// CreateTask 创建任务（保持向后兼容）
+func (c *SimpleTodoClient) CreateTask(title, description, listID string) error {
+	return c.CreateTaskWithDetails(title, description, listID, time.Time{}, time.Time{}, 5, "UTC")
 }
 
 // GetServerInfo 获取服务器信息
