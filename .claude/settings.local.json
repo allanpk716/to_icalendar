@@ -4,7 +4,8 @@
       "mcp__web-search-prime__webSearchPrime",
       "WebFetch(domain:www.busymac.com)",
       "Bash(go mod tidy:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []
