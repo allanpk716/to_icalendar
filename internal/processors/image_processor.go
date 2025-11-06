@@ -211,7 +211,7 @@ func (ip *ImageProcessor) saveImageToTempFile(imageData []byte, filePath string)
 	return os.WriteFile(filePath, imageData, 0644)
 }
 
-// Cleanup cleans up temporary files
+// Cleanup cleans up temporary files with error handling
 func (ip *ImageProcessor) Cleanup() error {
 	if ip.tempDir == "" {
 		return nil
@@ -219,13 +219,20 @@ func (ip *ImageProcessor) Cleanup() error {
 
 	log.Printf("清理临时目录: %s", ip.tempDir)
 
+	// 检查目录是否存在
+	if _, err := os.Stat(ip.tempDir); os.IsNotExist(err) {
+		log.Printf("临时目录不存在，无需清理: %s", ip.tempDir)
+		return nil
+	}
+
 	// 删除临时目录及其内容
 	err := os.RemoveAll(ip.tempDir)
 	if err != nil {
 		log.Printf("清理临时目录失败: %v", err)
-		return err
+		return fmt.Errorf("failed to cleanup temp directory %s: %w", ip.tempDir, err)
 	}
 
+	log.Printf("临时目录清理成功: %s", ip.tempDir)
 	return nil
 }
 

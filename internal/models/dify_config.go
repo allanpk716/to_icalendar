@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // DifyConfig represents the configuration for Dify API integration
 type DifyConfig struct {
@@ -9,6 +12,35 @@ type DifyConfig struct {
 	Model       string `yaml:"model"`        // Dify 模型名称
 	MaxTokens   int    `yaml:"max_tokens"`   // 最大token数量
 	Timeout     int    `yaml:"timeout"`      // 请求超时时间（秒）
+}
+
+// Validate validates the Dify configuration
+func (c *DifyConfig) Validate() error {
+	if c.APIEndpoint == "" {
+		return fmt.Errorf("Dify API endpoint is required")
+	}
+
+	if c.APIKey == "" {
+		return fmt.Errorf("Dify API key is required")
+	}
+
+	if c.APIKey == "YOUR_DIFY_API_KEY" {
+		return fmt.Errorf("please configure a valid Dify API key")
+	}
+
+	if c.Model == "" {
+		return fmt.Errorf("Dify model name is required")
+	}
+
+	if c.MaxTokens <= 0 || c.MaxTokens > 8000 {
+		return fmt.Errorf("max_tokens must be between 1 and 8000")
+	}
+
+	if c.Timeout <= 0 || c.Timeout > 300 {
+		return fmt.Errorf("timeout must be between 1 and 300 seconds")
+	}
+
+	return nil
 }
 
 // DifyRequest represents a request to the Dify API for content processing.

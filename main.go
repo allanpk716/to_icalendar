@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -8,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/internal/clipboard"
 	"github.com/allanpk716/to_icalendar/internal/config"
+	"github.com/allanpk716/to_icalendar/internal/dify"
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
+	"github.com/allanpk716/to_icalendar/internal/processors"
 )
 
 const (
@@ -38,6 +42,8 @@ func main() {
 		handleUpload()
 	case "test":
 		handleTest()
+	case "clip":
+		handleClip()
 	case "help", "-h", "--help":
 		showUsage()
 	default:
@@ -344,6 +350,7 @@ Commands:
   init                    Initialize configuration files
   upload <file>           Send reminders (supports wildcards *.json)
   test                    Test service connection
+  clip                    Process clipboard content (image or text) and generate JSON
   help                    Show this help message
 
 Examples:
@@ -351,9 +358,10 @@ Examples:
   %s upload config/reminder.json                  # Send single reminder
   %s upload reminders/*.json                      # Send batch reminders
   %s test                                          # Test connection
+  %s clip                                          # Process clipboard and generate JSON
 
 Configuration files:
-  config/server.yaml       Service configuration (Microsoft Todo)
+  config/server.yaml       Service configuration (Microsoft Todo & Dify)
   config/reminder.json     Reminder template
 
 Supported services:
@@ -364,10 +372,182 @@ Supported services:
 
 Instructions:
   1. Run 'to_icalendar init' to initialize configuration files
-  2. Edit config/server.yaml to configure Microsoft Todo
+  2. Edit config/server.yaml to configure Microsoft Todo and Dify API
   3. Run 'to_icalendar test' to test connection
   4. Run 'to_icalendar upload' to send reminders
+  5. Run 'to_icalendar clip' to process clipboard content
 
 For more information, see README.md
-`, appName, appName, appName, appName, appName)
+`, appName, appName, appName, appName, appName, appName)
+}
+
+// handleClip processes clipboard content (image or text) using Dify API
+// and generates a JSON reminder file. It handles the complete workflow:
+// 1. Load and validate server configuration
+// 2. Initialize clipboard and Dify clients
+// 3. Read content from clipboard
+// 4. Process content using Dify API
+// 5. Generate JSON reminder file
+func handleClip() {
+	fmt.Println("Starting clipboard processing...")
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Load configuration
+	configManager := config.NewConfigManager()
+	serverConfigPath := filepath.Join(configDir, serverConfigFile)
+	serverConfig, err := configManager.LoadServerConfig(serverConfigPath)
+	if err != nil {
+		log.Fatalf("Failed to load server configuration: %v", err)
+	}
+
+	// Validate configuration - need both Microsoft Todo and Dify configs
+	if !validateMicrosoftTodoConfig(serverConfig) {
+		log.Fatalf("No valid Microsoft Todo configuration found")
+	}
+
+	// Validate Dify configuration
+	if err := serverConfig.Dify.Validate(); err != nil {
+		log.Fatalf("Invalid Dify configuration: %v", err)
+	}
+
+	fmt.Println("✓ Configuration loaded successfully")
+
+	// Initialize Dify client
+	difyClient := dify.NewClient(serverConfig.Dify)
+
+	// Initialize Dify processor
+	difyProcessor := dify.NewProcessor(difyClient, "clipboard-user", dify.DefaultProcessingOptions())
+
+	// Initialize image processor
+	imageProcessor, err := processors.NewImageProcessor(difyProcessor)
+	if err != nil {
+		log.Fatalf("Failed to create image processor: %v", err)
+	}
+	defer imageProcessor.Cleanup()
+
+	// Initialize clipboard manager
+	clipboardManager, err := clipboard.NewManager()
+	if err != nil {
+		log.Fatalf("Failed to initialize clipboard manager: %v", err)
+	}
+
+	// Read clipboard content
+	fmt.Println("Reading clipboard content...")
+	hasContent, err := clipboardManager.HasContent()
+	if err != nil {
+		log.Fatalf("Failed to check clipboard content: %v", err)
+	}
+
+	if !hasContent {
+		log.Fatalf("No content found in clipboard")
+	}
+
+	// Get content type
+	contentType, err := clipboardManager.GetContentType()
+	if err != nil {
+		log.Fatalf("Failed to determine clipboard content type: %v", err)
+	}
+
+	fmt.Printf("✓ Detected content type: %s\n", contentType)
+
+	var processingResult *models.ProcessingResult
+
+	// Process based on content type
+	switch contentType {
+	case models.ContentTypeImage:
+		fmt.Println("Processing image from clipboard...")
+		imageData, err := clipboardManager.ReadImage()
+		if err != nil {
+			log.Fatalf("Failed to read image from clipboard: %v", err)
+		}
+
+		result, err := imageProcessor.ProcessClipboardImage(ctx, imageData)
+		if err != nil {
+			log.Fatalf("Failed to process clipboard image: %v", err)
+		}
+
+		processingResult = result
+
+	case models.ContentTypeText:
+		fmt.Println("Processing text from clipboard...")
+		text, err := clipboardManager.ReadText()
+		if err != nil {
+			log.Fatalf("Failed to read text from clipboard: %v", err)
+		}
+
+		if strings.TrimSpace(text) == "" {
+			log.Fatalf("Clipboard text is empty")
+		}
+
+		fmt.Printf("Text content (first 100 chars): %s...\n", strings.TrimSpace(text)[:min(100, len(text))])
+
+		// Process text using Dify
+		difyResponse, err := difyProcessor.ProcessText(ctx, text)
+		if err != nil {
+			log.Fatalf("Failed to process text: %v", err)
+		}
+
+		// Convert to processing result
+		processingResult = &models.ProcessingResult{
+			Success:      difyResponse.Success,
+			Reminder:     difyResponse.Reminder,
+			ParsedInfo:   difyResponse.ParsedInfo,
+			ErrorMessage: difyResponse.ErrorMessage,
+		}
+
+	default:
+		log.Fatalf("Unsupported content type: %s", contentType)
+	}
+
+	// Check processing result
+	if !processingResult.Success {
+		log.Fatalf("Processing failed: %s", processingResult.ErrorMessage)
+	}
+
+	if processingResult.Reminder == nil {
+		log.Fatalf("No reminder data generated from processing")
+	}
+
+	fmt.Println("\n✓ Content processed successfully")
+	fmt.Printf("  Title: %s\n", processingResult.Reminder.Title)
+	if processingResult.Reminder.Description != "" {
+		fmt.Printf("  Description: %s\n", processingResult.Reminder.Description)
+	}
+	fmt.Printf("  Date: %s\n", processingResult.Reminder.Date)
+	fmt.Printf("  Time: %s\n", processingResult.Reminder.Time)
+	if processingResult.Reminder.RemindBefore != "" {
+		fmt.Printf("  Remind Before: %s\n", processingResult.Reminder.RemindBefore)
+	}
+	fmt.Printf("  List: %s\n", processingResult.Reminder.List)
+
+	// Generate JSON file
+	fmt.Println("\nGenerating JSON file...")
+
+	outputDir := "generated"
+	jsonGenerator, err := processors.NewJSONGenerator(outputDir)
+	if err != nil {
+		log.Fatalf("Failed to create JSON generator: %v", err)
+	}
+
+	jsonFilePath, err := jsonGenerator.GenerateFromReminder(processingResult.Reminder)
+	if err != nil {
+		log.Fatalf("Failed to generate JSON file: %v", err)
+	}
+
+	fmt.Printf("\n✓ JSON file generated: %s\n", jsonFilePath)
+	fmt.Println("\nNext steps:")
+	fmt.Printf("1. Review the generated JSON file: %s\n", jsonFilePath)
+	fmt.Println("2. Run 'to_icalendar upload " + jsonFilePath + "' to send to Microsoft Todo")
+	fmt.Println("   OR manually upload to your todo application")
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

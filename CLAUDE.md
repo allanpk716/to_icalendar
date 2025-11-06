@@ -110,3 +110,4 @@ The application sends data in a format compatible with Microsoft Todo:
 - HTTPS communication with Microsoft Graph API endpoints
 - No password storage or management needed
 - Requires Azure AD application registration and API permissions
+- 使用 github.com/WQGroup/logger 作为项目的日志库
