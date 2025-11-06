@@ -68,11 +68,11 @@ func TestContentValidator_ValidateText(t *testing.T) {
 				t.Errorf("Expected valid=%v, got %v", tt.expectValid, validation.IsValid)
 			}
 
-			if (validation.ErrorMessage != "") != tt.expectError {
-				if tt.expectError && validation.ErrorMessage == "" {
+			if (validation.Message != "") != tt.expectError {
+				if tt.expectError && validation.Message == "" {
 					t.Error("Expected error message but got none")
-				} else if !tt.expectError && validation.ErrorMessage != "" {
-					t.Errorf("Unexpected error message: %s", validation.ErrorMessage)
+				} else if !tt.expectError && validation.Message != "" {
+					t.Errorf("Unexpected error message: %s", validation.Message)
 				}
 			}
 		})
@@ -162,11 +162,11 @@ func TestContentValidator_ValidateImage(t *testing.T) {
 				t.Errorf("Expected valid=%v, got %v", tt.expectValid, validation.IsValid)
 			}
 
-			if (validation.ErrorMessage != "") != tt.expectError {
-				if tt.expectError && validation.ErrorMessage == "" {
+			if (validation.Message != "") != tt.expectError {
+				if tt.expectError && validation.Message == "" {
 					t.Error("Expected error message but got none")
-				} else if !tt.expectError && validation.ErrorMessage != "" {
-					t.Errorf("Unexpected error message: %s", validation.ErrorMessage)
+				} else if !tt.expectError && validation.Message != "" {
+					t.Errorf("Unexpected error message: %s", validation.Message)
 				}
 			}
 		})
@@ -228,11 +228,11 @@ func TestContentValidator_ValidateAPIEndpoint(t *testing.T) {
 				t.Errorf("Expected valid=%v, got %v", tt.expectValid, validation.IsValid)
 			}
 
-			if (validation.ErrorMessage != "") != tt.expectError {
-				if tt.expectError && validation.ErrorMessage == "" {
+			if (validation.Message != "") != tt.expectError {
+				if tt.expectError && validation.Message == "" {
 					t.Error("Expected error message but got none")
-				} else if !tt.expectError && validation.ErrorMessage != "" {
-					t.Errorf("Unexpected error message: %s", validation.ErrorMessage)
+				} else if !tt.expectError && validation.Message != "" {
+					t.Errorf("Unexpected error message: %s", validation.Message)
 				}
 			}
 		})
@@ -288,11 +288,11 @@ func TestContentValidator_ValidateAPIKey(t *testing.T) {
 				t.Errorf("Expected valid=%v, got %v", tt.expectValid, validation.IsValid)
 			}
 
-			if (validation.ErrorMessage != "") != tt.expectError {
-				if tt.expectError && validation.ErrorMessage == "" {
+			if (validation.Message != "") != tt.expectError {
+				if tt.expectError && validation.Message == "" {
 					t.Error("Expected error message but got none")
-				} else if !tt.expectError && validation.ErrorMessage != "" {
-					t.Errorf("Unexpected error message: %s", validation.ErrorMessage)
+				} else if !tt.expectError && validation.Message != "" {
+					t.Errorf("Unexpected error message: %s", validation.Message)
 				}
 			}
 		})

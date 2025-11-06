@@ -387,7 +387,7 @@ func isValidDateFormat(dateStr string) bool {
 	return true
 }
 
-// isValidTimeFormat checks if time string is in HH:MM format
+// isValidTimeFormat checks if time string is in HH:MM format and has valid values
 func isValidTimeFormat(timeStr string) bool {
 	if len(timeStr) != 5 {
 		return false
@@ -411,6 +411,20 @@ func isValidTimeFormat(timeStr string) bool {
 		if char < '0' || char > '9' {
 			return false
 		}
+	}
+
+	// 验证时间值的有效性
+	hourValue := (timeStr[0]-'0')*10 + (timeStr[1]-'0')
+	minuteValue := (timeStr[3]-'0')*10 + (timeStr[4]-'0')
+
+	// 检查小时范围（0-23）
+	if hourValue < 0 || hourValue > 23 {
+		return false
+	}
+
+	// 检查分钟范围（0-59）
+	if minuteValue < 0 || minuteValue > 59 {
+		return false
 	}
 
 	return true

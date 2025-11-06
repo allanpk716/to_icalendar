@@ -111,9 +111,10 @@ type ClipboardContent struct {
 type ContentType string
 
 const (
-	ContentTypeText  ContentType = "text"  // 文字内容
-	ContentTypeImage ContentType = "image" // 图片内容
-	ContentTypeEmpty ContentType = "empty" // 空内容
+	ContentTypeText    ContentType = "text"    // 文字内容
+	ContentTypeImage   ContentType = "image"   // 图片内容
+	ContentTypeEmpty   ContentType = "empty"   // 空内容
+	ContentTypeUnknown ContentType = "unknown" // 未知内容类型
 )
 
 // ProcessingResult represents the result of processing clipboard content.

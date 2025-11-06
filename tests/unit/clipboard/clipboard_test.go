@@ -48,7 +48,7 @@ func TestManager_GetContentType(t *testing.T) {
 
 	// Verify content type is valid
 	switch contentType {
-	case models.ContentTypeText, models.ContentTypeImage, models.ContentTypeUnknown:
+	case models.ContentTypeText, models.ContentTypeImage, models.ContentTypeEmpty, models.ContentTypeUnknown:
 		// Valid types
 		t.Logf("Content type: %s", contentType)
 	default:
