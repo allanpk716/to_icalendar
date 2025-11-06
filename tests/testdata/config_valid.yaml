@@ -1,0 +1,10 @@
+microsoft_todo:
+  tenant_id: "test-tenant-id-12345"
+  client_id: "test-client-id-67890"
+  client_secret: "test-client-secret-abcdef"
+  timezone: "Asia/Shanghai"
+
+dify:
+  api_endpoint: "https://api.dify.ai/v1"
+  api_key: "test-valid-api-key-12345"
+  model: "gpt-3.5-turbo"

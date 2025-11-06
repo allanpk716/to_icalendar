@@ -1,0 +1,10 @@
+microsoft_todo:
+  tenant_id: ""
+  client_id: ""
+  client_secret: ""
+  timezone: ""
+
+dify:
+  api_endpoint: ""
+  api_key: "YOUR_DIFY_API_KEY"
+  model: ""
