@@ -224,8 +224,33 @@ func (p *ResponseParserImpl) isValidDateFormat(dateStr string) bool {
 	return true
 }
 
-// isValidTimeFormat checks if the string is a valid time format (HH:MM)
+// isValidTimeFormat checks if the string is a valid time format (HH:MM or HH:MM - HH:MM)
 func (p *ResponseParserImpl) isValidTimeFormat(timeStr string) bool {
+	timeStr = strings.TrimSpace(timeStr)
+
+	// 检查是否是时间范围格式 (HH:MM - HH:MM)
+	if strings.Contains(timeStr, " - ") {
+		parts := strings.Split(timeStr, " - ")
+		if len(parts) != 2 {
+			return false
+		}
+		// 检查开始时间
+		if !p.isValidSingleTimeFormat(strings.TrimSpace(parts[0])) {
+			return false
+		}
+		// 检查结束时间
+		if !p.isValidSingleTimeFormat(strings.TrimSpace(parts[1])) {
+			return false
+		}
+		return true
+	}
+
+	// 检查单个时间格式 (HH:MM)
+	return p.isValidSingleTimeFormat(timeStr)
+}
+
+// isValidSingleTimeFormat checks if the string is a valid single time format (HH:MM)
+func (p *ResponseParserImpl) isValidSingleTimeFormat(timeStr string) bool {
 	if len(timeStr) != 5 {
 		return false
 	}

@@ -83,8 +83,21 @@ func (p *ScreenshotProcessorImpl) ProcessScreenshot(ctx context.Context, screens
 		return nil, fmt.Errorf("dify processing failed: %w", err)
 	}
 
-	// 3. 解析响应
-	parsedInfo, err := p.parser.ParseReminderResponse(difyResponse.Answer)
+	// 3. 解析响应 - 工作流响应可能没有Answer字段
+	responseText := difyResponse.Answer
+	if responseText == "" && difyResponse.Data != nil && difyResponse.Data.Outputs != nil {
+		// 从工作流响应中获取文本
+		responseText = difyResponse.Data.Outputs.Text
+		log.Printf("[ScreenshotProcessor] 从工作流响应获取文本，长度: %d", len(responseText))
+	}
+
+	if responseText == "" {
+		return nil, fmt.Errorf("empty response from Dify")
+	}
+
+	log.Printf("[ScreenshotProcessor] Dify响应文本: %s", responseText)
+
+	parsedInfo, err := p.parser.ParseReminderResponse(responseText)
 	if err != nil {
 		return nil, fmt.Errorf("response parsing failed: %w", err)
 	}

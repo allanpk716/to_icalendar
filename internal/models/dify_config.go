@@ -74,11 +74,35 @@ type DifyFile struct {
 
 // DifyResponse represents the response from Dify API.
 type DifyResponse struct {
-	Answer      string                 `json:"answer"`                   // AI生成的回答
+	Answer      string                 `json:"answer"`                   // AI生成的回答 (chat-messages)
 	MessageID   string                 `json:"message_id"`               // 消息ID
 	CreatedAt   time.Time              `json:"created_at"`               // 创建时间
 	ConversationID string              `json:"conversation_id,omitempty"` // 对话ID
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`       // 元数据
+
+	// 工作流响应字段
+	TaskID      string                 `json:"task_id,omitempty"`      // 任务ID
+	WorkflowRunID string                 `json:"workflow_run_id,omitempty"` // 工作流运行ID
+	Data        *DifyWorkflowData       `json:"data,omitempty"`        // 工作流数据
+}
+
+// DifyWorkflowData represents the data structure from workflow response
+type DifyWorkflowData struct {
+	ID               string                 `json:"id"`               // 数据ID
+	WorkflowID      string                 `json:"workflow_id"`      // 工作流ID
+	Status           string                 `json:"status"`           // 状态
+	Outputs          *DifyWorkflowOutputs    `json:"outputs,omitempty"`  // 输出
+	Error            interface{}            `json:"error,omitempty"`    // 错误信息
+	ElapsedTime      float64                `json:"elapsed_time"`    // 执行时间
+	TotalTokens      int                    `json:"total_tokens"`    // 总Token数
+	TotalSteps       int                    `json:"total_steps"`     // 总步数
+	CreatedAt        int64                  `json:"created_at"`       // 创建时间（时间戳）
+	FinishedAt       int64                  `json:"finished_at"`      // 完成时间（时间戳）
+}
+
+// DifyWorkflowOutputs represents the outputs from workflow
+type DifyWorkflowOutputs struct {
+	Text string `json:"text"` // 输出文本（JSON格式的任务信息）
 }
 
 // DifyErrorResponse represents an error response from Dify API.

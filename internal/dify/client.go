@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/models"
@@ -77,84 +80,183 @@ func (c *Client) ProcessText(ctx context.Context, text string, userID string) (*
 
 // ProcessImage processes image content using Dify workflow API
 func (c *Client) ProcessImage(ctx context.Context, imageData []byte, fileName string, userID string) (*models.DifyResponse, error) {
+	log.Printf("[DifyClient] 开始处理图片: %s, 大小: %d bytes, 用户ID: %s", fileName, len(imageData), userID)
+	log.Printf("[DifyClient] API 端点: %s", c.apiEndpoint)
+
 	if len(imageData) == 0 {
 		return nil, fmt.Errorf("image data cannot be empty")
 	}
 
-	// Create multipart form data for workflow
+	// 按照正确的流程：先上传文件，再运行工作流
+	log.Printf("[DifyClient] 开始上传文件...")
+	fileID, err := c.uploadFile(ctx, imageData, fileName, userID)
+	if err != nil {
+		return nil, fmt.Errorf("文件上传失败: %w", err)
+	}
+
+	log.Printf("[DifyClient] 文件上传成功，ID: %s", fileID)
+	log.Printf("[DifyClient] 开始运行工作流...")
+
+	// 使用文件ID运行工作流
+	difyResp, err := c.runWorkflowWithFile(ctx, fileID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("工作流运行失败: %w", err)
+	}
+
+	log.Printf("[DifyClient] 工作流运行成功")
+	return difyResp, nil
+}
+
+// uploadFile 上传文件到 Dify
+func (c *Client) uploadFile(ctx context.Context, fileData []byte, fileName string, userID string) (string, error) {
+	log.Printf("[DifyClient] 上传文件: %s, 大小: %d bytes", fileName, len(fileData))
+
+	// 创建 multipart form data
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Add inputs as JSON with screenshot field
-	inputs := map[string]interface{}{
-		"screenshot": fileName,
-	}
-	inputsJSON, _ := json.Marshal(inputs)
-	_ = writer.WriteField("inputs", string(inputsJSON))
-
-	// Add response mode
-	_ = writer.WriteField("response_mode", "blocking")
-
-	// Add user
-	_ = writer.WriteField("user", userID)
-
-	// Add auto_generate_name
-	_ = writer.WriteField("auto_generate_name", "false")
-
-	// Add file
-	part, err := writer.CreateFormFile("files", fileName)
+	// 添加文件
+	part, err := writer.CreateFormFile("file", fileName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create form file: %w", err)
+		return "", fmt.Errorf("创建文件字段失败: %w", err)
 	}
 
-	_, err = io.Copy(part, bytes.NewReader(imageData))
+	_, err = io.Copy(part, bytes.NewReader(fileData))
 	if err != nil {
-		return nil, fmt.Errorf("failed to copy image data: %w", err)
+		return "", fmt.Errorf("写入文件数据失败: %w", err)
 	}
 
-	// Close multipart writer
+	// 添加其他字段
+	if err := writer.WriteField("user", userID); err != nil {
+		return "", fmt.Errorf("写入user字段失败: %w", err)
+	}
+
+	// 确定文件类型
+	ext := strings.ToLower(filepath.Ext(fileName))
+	fileType := "IMAGE" // 默认为图像类型
+	switch ext {
+	case ".txt":
+		fileType = "TXT"
+	case ".pdf":
+		fileType = "PDF"
+	case ".doc", ".docx":
+		fileType = "WORD"
+	}
+
+	if err := writer.WriteField("type", fileType); err != nil {
+		return "", fmt.Errorf("写入type字段失败: %w", err)
+	}
+
+	// 关闭 multipart writer
 	err = writer.Close()
 	if err != nil {
-		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+		return "", fmt.Errorf("关闭multipart writer失败: %w", err)
 	}
 
-	// Create HTTP request for workflow
-	req, err := http.NewRequestWithContext(ctx, "POST", c.apiEndpoint+"/workflows/run", &buf)
+	// 创建 HTTP 请求
+	req, err := http.NewRequestWithContext(ctx, "POST", c.apiEndpoint+"/files/upload", &buf)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return "", fmt.Errorf("创建上传请求失败: %w", err)
 	}
 
-	// Set headers
+	// 设置请求头
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	// Make request
+	log.Printf("[DifyClient] 发送文件上传请求...")
+	log.Printf("[DifyClient] Content-Type: %s", writer.FormDataContentType())
+
+	// 发送请求
 	httpClient := &http.Client{Timeout: c.timeout}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make HTTP request: %w", err)
+		return "", fmt.Errorf("发送上传请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Read response
+	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return "", fmt.Errorf("读取上传响应失败: %w", err)
 	}
 
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
+	log.Printf("[DifyClient] 上传响应状态码: %d", resp.StatusCode)
+	log.Printf("[DifyClient] 上传响应内容: %s", string(body))
+
+	// 检查状态码
+	if resp.StatusCode != 201 { // 201 表示创建成功
 		var errorResp models.DifyErrorResponse
 		if err := json.Unmarshal(body, &errorResp); err == nil {
-			return nil, fmt.Errorf("Dify API error: %s (code: %s)", errorResp.Message, errorResp.Code)
+			return "", fmt.Errorf("文件上传失败: %s (code: %s)", errorResp.Message, errorResp.Code)
 		}
-		return nil, fmt.Errorf("Dify API returned status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("文件上传失败，状态码: %d, 响应: %s", resp.StatusCode, string(body))
 	}
 
-	// Parse response
+	// 解析响应获取文件 ID
+	var uploadResp struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &uploadResp); err != nil {
+		return "", fmt.Errorf("解析上传响应失败: %w", err)
+	}
+
+	if uploadResp.ID == "" {
+		return "", fmt.Errorf("上传响应中未找到文件ID")
+	}
+
+	return uploadResp.ID, nil
+}
+
+// runWorkflowWithFile 使用文件ID运行工作流
+func (c *Client) runWorkflowWithFile(ctx context.Context, fileID string, userID string) (*models.DifyResponse, error) {
+	log.Printf("[DifyClient] 使用文件ID运行工作流: %s", fileID)
+
+	// 构建请求数据，根据错误信息调整格式
+	inputs := map[string]interface{}{
+		"screenshot": map[string]interface{}{
+			"transfer_method": "local_file",
+			"upload_file_id":  fileID,
+			"type":           "image",
+		},
+	}
+
+	request := models.DifyImageRequest{
+		Inputs:           inputs,
+		ResponseMode:     "blocking",
+		User:             userID,
+		AutoGenerateName: false,
+	}
+
+	log.Printf("[DifyClient] 工作流请求数据: %+v", inputs)
+
+	// 发送工作流请求
+	response, err := c.httpClient.R().
+		SetContext(ctx).
+		SetHeader("Authorization", "Bearer "+c.apiKey).
+		SetHeader("Content-Type", "application/json").
+		SetBody(request).
+		Post(c.apiEndpoint + "/workflows/run")
+
+	if err != nil {
+		return nil, fmt.Errorf("发送工作流请求失败: %w", err)
+	}
+
+	log.Printf("[DifyClient] 工作流响应状态码: %d", response.StatusCode())
+	log.Printf("[DifyClient] 工作流响应内容: %s", string(response.Body()))
+
+	// 检查响应状态
+	if response.StatusCode() != http.StatusOK {
+		var errorResp models.DifyErrorResponse
+		if err := json.Unmarshal(response.Body(), &errorResp); err == nil {
+			return nil, fmt.Errorf("工作流执行失败: %s (code: %s)", errorResp.Message, errorResp.Code)
+		}
+		return nil, fmt.Errorf("工作流执行失败，状态码: %d, 响应: %s", response.StatusCode(), string(response.Body()))
+	}
+
+	// 解析响应
 	var difyResp models.DifyResponse
-	if err := json.Unmarshal(body, &difyResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Dify response: %w", err)
+	if err := json.Unmarshal(response.Body(), &difyResp); err != nil {
+		return nil, fmt.Errorf("解析工作流响应失败: %w", err)
 	}
 
 	return &difyResp, nil
@@ -270,4 +372,12 @@ func (c *Client) GetConfig() map[string]interface{} {
 		"api_endpoint": c.apiEndpoint,
 		"timeout":      c.timeout.String(),
 	}
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -1,3 +1,4 @@
-/*.exe
+*.exe
 /config
 /to_icalendar
+/cmd/test_dify/test-images

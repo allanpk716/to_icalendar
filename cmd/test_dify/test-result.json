@@ -1,0 +1,22 @@
+{
+  "image_path": ".\\test-images\\1 (1).jpg",
+  "start_time": "2025-11-13T19:10:26.6902592+08:00",
+  "processing_time": 5247006700,
+  "success": true,
+  "reminder": {
+    "title": "BM200上市前评估及结项工作讨论会",
+    "description": "地点：普诺基F栋509；参会人员包括秦鑫龙, 程宇恒,刘泽霖,韦笑,李捷。",
+    "date": "2025-11-06",
+    "time": "14:30 - 16:30",
+    "remind_before": "30m",
+    "priority": "high",
+    "list": "会议"
+  },
+  "configuration": {
+    "APIEndpoint": "http://dify.urithub.com/v1",
+    "APIKey": "app-m51AZqIDX3FdklmHTLyG6Teg",
+    "Timeout": 30,
+    "Model": "",
+    "MaxTokens": 0
+  }
+}
