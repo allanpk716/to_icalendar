@@ -9,8 +9,6 @@ import (
 type DifyConfig struct {
 	APIEndpoint string `yaml:"api_endpoint"` // Dify API 端点
 	APIKey      string `yaml:"api_key"`      // Dify API 密钥
-	Model       string `yaml:"model"`        // Dify 模型名称
-	MaxTokens   int    `yaml:"max_tokens"`   // 最大token数量
 	Timeout     int    `yaml:"timeout"`      // 请求超时时间（秒）
 }
 
@@ -26,14 +24,6 @@ func (c *DifyConfig) Validate() error {
 
 	if c.APIKey == "YOUR_DIFY_API_KEY" {
 		return fmt.Errorf("please configure a valid Dify API key")
-	}
-
-	if c.Model == "" {
-		return fmt.Errorf("Dify model name is required")
-	}
-
-	if c.MaxTokens <= 0 || c.MaxTokens > 8000 {
-		return fmt.Errorf("max_tokens must be between 1 and 8000")
 	}
 
 	if c.Timeout <= 0 || c.Timeout > 300 {

@@ -5,7 +5,8 @@
       "WebFetch(domain:www.busymac.com)",
       "Bash(go mod tidy:*)",
       "Bash(find:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "mcp__serena__list_dir"
     ],
     "deny": [],
     "ask": []

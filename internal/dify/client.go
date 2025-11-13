@@ -18,14 +18,12 @@ import (
 type Client struct {
 	apiEndpoint string
 	apiKey      string
-	model       string
-	maxTokens   int
 	timeout     time.Duration
 	httpClient  *resty.Client
 }
 
-// NewClient creates a new Dify API client
-func NewClient(config models.DifyConfig) *Client {
+// NewDifyClient creates a new Dify API client
+func NewDifyClient(config *models.DifyConfig) *Client {
 	timeout := time.Duration(config.Timeout) * time.Second
 	if timeout == 0 {
 		timeout = 30 * time.Second // Default timeout
@@ -40,8 +38,6 @@ func NewClient(config models.DifyConfig) *Client {
 	return &Client{
 		apiEndpoint: config.APIEndpoint,
 		apiKey:      config.APIKey,
-		model:       config.Model,
-		maxTokens:   config.MaxTokens,
 		timeout:     timeout,
 		httpClient:  client,
 	}
@@ -79,18 +75,22 @@ func (c *Client) ProcessText(ctx context.Context, text string, userID string) (*
 	return &difyResp, nil
 }
 
-// ProcessImage processes image content using Dify API
+// ProcessImage processes image content using Dify workflow API
 func (c *Client) ProcessImage(ctx context.Context, imageData []byte, fileName string, userID string) (*models.DifyResponse, error) {
 	if len(imageData) == 0 {
 		return nil, fmt.Errorf("image data cannot be empty")
 	}
 
-	// Create multipart form data
+	// Create multipart form data for workflow
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Add query field
-	_ = writer.WriteField("query", "请分析这张截图中的内容，提取任务信息（标题、描述、时间、优先级等），并按照JSON格式返回结构化的任务数据。如果无法识别为任务，请返回描述截图内容。")
+	// Add inputs as JSON with screenshot field
+	inputs := map[string]interface{}{
+		"screenshot": fileName,
+	}
+	inputsJSON, _ := json.Marshal(inputs)
+	_ = writer.WriteField("inputs", string(inputsJSON))
 
 	// Add response mode
 	_ = writer.WriteField("response_mode", "blocking")
@@ -100,13 +100,6 @@ func (c *Client) ProcessImage(ctx context.Context, imageData []byte, fileName st
 
 	// Add auto_generate_name
 	_ = writer.WriteField("auto_generate_name", "false")
-
-	// Add inputs as JSON
-	inputs := map[string]interface{}{
-		"image": fileName,
-	}
-	inputsJSON, _ := json.Marshal(inputs)
-	_ = writer.WriteField("inputs", string(inputsJSON))
 
 	// Add file
 	part, err := writer.CreateFormFile("files", fileName)
@@ -125,8 +118,8 @@ func (c *Client) ProcessImage(ctx context.Context, imageData []byte, fileName st
 		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
 	}
 
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", c.apiEndpoint+"/chat-messages", &buf)
+	// Create HTTP request for workflow
+	req, err := http.NewRequestWithContext(ctx, "POST", c.apiEndpoint+"/workflows/run", &buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
@@ -268,9 +261,6 @@ func (c *Client) ValidateConfig() error {
 	if c.apiKey == "" {
 		return fmt.Errorf("Dify API key is required")
 	}
-	if c.model == "" {
-		return fmt.Errorf("Dify model is required")
-	}
 	return nil
 }
 
@@ -278,8 +268,6 @@ func (c *Client) ValidateConfig() error {
 func (c *Client) GetConfig() map[string]interface{} {
 	return map[string]interface{}{
 		"api_endpoint": c.apiEndpoint,
-		"model":        c.model,
-		"max_tokens":   c.maxTokens,
 		"timeout":      c.timeout.String(),
 	}
 }
