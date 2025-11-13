@@ -40,7 +40,7 @@ type ProcessorInfo struct {
 
 // ScreenshotProcessorImpl 截图处理器实现
 type ScreenshotProcessorImpl struct {
-	client  DifyClient
+	client  *Client
 	parser  ResponseParser
 	config  *models.DifyConfig
 }

@@ -416,7 +416,7 @@ func handleClip() {
 	fmt.Println("✓ Configuration loaded successfully")
 
 	// Initialize Dify client
-	difyClient := dify.NewClient(serverConfig.Dify)
+	difyClient := dify.NewDifyClient(&serverConfig.Dify)
 
 	// Initialize Dify processor
 	difyProcessor := dify.NewProcessor(difyClient, "clipboard-user", dify.DefaultProcessingOptions())

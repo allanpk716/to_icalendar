@@ -43,21 +43,21 @@ func (p *ResponseParserImpl) ParseReminderResponse(response string) (*models.Par
 	}
 
 	// 如果直接解析失败，尝试从响应中提取JSON
-	taskInfo, err := p.extractJSONFromResponse(cleanedResponse)
+	taskInfoPtr, err := p.extractJSONFromResponse(cleanedResponse)
 	if err != nil {
 		// 如果无法提取有效JSON，尝试从文本中解析任务信息
 		return p.parseTaskFromText(cleanedResponse)
 	}
 
 	// 验证解析结果
-	if !p.validateTaskInfo(taskInfo) {
+	if !p.validateTaskInfo(taskInfoPtr) {
 		return nil, fmt.Errorf("parsed task info is incomplete or invalid")
 	}
 
 	log.Printf("成功解析任务信息: 标题='%s', 日期='%s', 时间='%s'",
-		taskInfo.Title, taskInfo.Date, taskInfo.Time)
+		taskInfoPtr.Title, taskInfoPtr.Date, taskInfoPtr.Time)
 
-	return taskInfo, nil
+	return taskInfoPtr, nil
 }
 
 // extractJSONFromResponse attempts to extract JSON from a mixed response
