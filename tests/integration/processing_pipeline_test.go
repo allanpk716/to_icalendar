@@ -1,7 +1,6 @@
 package integration_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,6 +83,7 @@ func TestProcessingPipeline_ConfigLoadingToJSONGeneration(t *testing.T) {
 		Dify: models.DifyConfig{
 			APIEndpoint: "https://api.dify.ai/v1",
 			APIKey:      "test-api-key-for-integration",
+			Timeout:     30, // 添加超时时间
 			Model:       "gpt-3.5-turbo",
 		},
 		MicrosoftTodo: models.MicrosoftTodoConfig{

@@ -38,9 +38,14 @@ type ProcessorInfo struct {
 	MaxFileSize      int64    `json:"max_file_size"`
 }
 
+// DifyImageClient Dify图片处理客户端接口
+type DifyImageClient interface {
+	ProcessImage(ctx context.Context, imageData []byte, fileName string, userID string) (*models.DifyResponse, error)
+}
+
 // ScreenshotProcessorImpl 截图处理器实现
 type ScreenshotProcessorImpl struct {
-	client  *Client
+	client  DifyImageClient
 	parser  ResponseParser
 	config  *models.DifyConfig
 }

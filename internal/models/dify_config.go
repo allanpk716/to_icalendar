@@ -10,6 +10,8 @@ type DifyConfig struct {
 	APIEndpoint string `yaml:"api_endpoint"` // Dify API 端点
 	APIKey      string `yaml:"api_key"`      // Dify API 密钥
 	Timeout     int    `yaml:"timeout"`      // 请求超时时间（秒）
+	Model       string `yaml:"model"`        // Dify 模型名称
+	MaxTokens   int    `yaml:"max_tokens"`   // 最大令牌数
 }
 
 // Validate validates the Dify configuration
@@ -28,6 +30,16 @@ func (c *DifyConfig) Validate() error {
 
 	if c.Timeout <= 0 || c.Timeout > 300 {
 		return fmt.Errorf("timeout must be between 1 and 300 seconds")
+	}
+
+	// Model is optional but if provided, should not be empty
+	if c.Model != "" && len(c.Model) < 2 {
+		return fmt.Errorf("model name must be at least 2 characters long")
+	}
+
+	// MaxTokens is optional but if provided, should be reasonable
+	if c.MaxTokens != 0 && (c.MaxTokens < 100 || c.MaxTokens > 100000) {
+		return fmt.Errorf("max_tokens must be between 100 and 100000")
 	}
 
 	return nil

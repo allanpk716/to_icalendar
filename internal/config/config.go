@@ -165,6 +165,29 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	return nil
 }
 
+// SaveServerConfig 保存服务器配置文件
+func (cm *ConfigManager) SaveServerConfig(configPath string, config *models.ServerConfig) error {
+	// 序列化为YAML
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal server config: %w", err)
+	}
+
+	// Ensure directory exists with secure permissions
+	dir := filepath.Dir(configPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write file with restricted permissions (owner read/write only)
+	err = os.WriteFile(configPath, data, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to write server config: %w", err)
+	}
+
+	return nil
+}
+
 // CreateReminderTemplate 创建提醒事项模板文件
 func (cm *ConfigManager) CreateReminderTemplate(reminderPath string) error {
 	template := models.Reminder{

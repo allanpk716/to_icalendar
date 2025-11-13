@@ -3,6 +3,7 @@ package processors_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/processors"
 )
@@ -16,6 +17,12 @@ func TestTaskParser_NewTaskParser(t *testing.T) {
 
 func TestTaskParser_ParseFromText(t *testing.T) {
 	parser := processors.NewTaskParser()
+
+	// 计算期望的相对日期
+	now := time.Now()
+	tomorrow := now.AddDate(0, 0, 1)
+	today := now.Format("2006-01-02")
+	tomorrowStr := tomorrow.Format("2006-01-02")
 
 	tests := []struct {
 		name            string
@@ -31,7 +38,7 @@ func TestTaskParser_ParseFromText(t *testing.T) {
 			name:            "meeting with datetime",
 			input:           "明天下午2点开会讨论项目进展",
 			expectedTitle:   "明天下午2点开会讨论项目进展",
-			expectedDate:    "2025-11-07",
+			expectedDate:    tomorrowStr,
 			expectedTime:    "",
 			expectedPriority: "",
 			minConfidence:   0.5,
@@ -41,7 +48,7 @@ func TestTaskParser_ParseFromText(t *testing.T) {
 			name:            "urgent task",
 			input:           "今天下午必须完成重要报告，非常紧急",
 			expectedTitle:   "今天下午必须完成重要报告，非常",
-			expectedDate:    "2025-11-06",
+			expectedDate:    today,
 			expectedTime:    "",
 			expectedPriority: "high",
 			minConfidence:   0.6,
@@ -71,7 +78,7 @@ func TestTaskParser_ParseFromText(t *testing.T) {
 			name:            "task with list",
 			input:           "明天去超市买东西 - 购物清单",
 			expectedTitle:   "明天去超市买东西 - 购物清单",
-			expectedDate:    "2025-11-07",
+			expectedDate:    tomorrowStr,
 			expectedTime:    "",
 			expectedPriority: "",
 			minConfidence:   0.4,

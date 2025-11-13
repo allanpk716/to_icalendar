@@ -94,10 +94,10 @@ func (te *TestEnvironment) LoadConfig() *models.ServerConfig {
 }
 
 // UpdateConfig updates the configuration in the test environment
-func (te *TestEnvironment) UpdateConfig(config *models.ServerConfig) {
-	te.Config = config
+func (te *TestEnvironment) UpdateConfig(newConfig *models.ServerConfig) {
+	te.Config = newConfig
 	configManager := config.NewConfigManager()
-	if err := configManager.SaveServerConfig(te.ConfigPath, config); err != nil {
+	if err := configManager.SaveServerConfig(te.ConfigPath, newConfig); err != nil {
 		te.T.Fatalf("Failed to update configuration: %v", err)
 	}
 }
