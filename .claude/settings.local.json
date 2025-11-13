@@ -6,7 +6,8 @@
       "Bash(go mod tidy:*)",
       "Bash(find:*)",
       "Bash(findstr:*)",
-      "mcp__serena__list_dir"
+      "mcp__serena__list_dir",
+      "mcp__serena__think_about_collected_information"
     ],
     "deny": [],
     "ask": []

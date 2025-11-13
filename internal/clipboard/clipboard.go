@@ -6,11 +6,53 @@ import (
 	"image"
 	"image/png"
 	"time"
+	"unsafe"
 
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/atotto/clipboard"
 	"github.com/disintegration/imaging"
+	"golang.org/x/sys/windows"
 )
+
+// Windows API constants
+const (
+	CF_DIB     = 8
+	CF_BITMAP = 2
+)
+
+var (
+	user32           = windows.NewLazySystemDLL("user32.dll")
+	kernel32         = windows.NewLazySystemDLL("kernel32.dll")
+
+	procOpenClipboard    = user32.NewProc("OpenClipboard")
+	procCloseClipboard   = user32.NewProc("CloseClipboard")
+	procGetClipboardData = user32.NewProc("GetClipboardData")
+	procEnumClipboardFormats = user32.NewProc("EnumClipboardFormats")
+	procIsClipboardFormatAvailable = user32.NewProc("IsClipboardFormatAvailable")
+	procGlobalLock   = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock = kernel32.NewProc("GlobalUnlock")
+	procGlobalSize   = kernel32.NewProc("GlobalSize")
+)
+
+// BITMAPINFO structure for Windows DIB format
+type BITMAPINFOHEADER struct {
+	Size          uint32
+	Width         int32
+	Height        int32
+	Planes        uint16
+	BitCount      uint16
+	Compression   uint32
+	SizeImage     uint32
+	XPelsPerMeter int32
+	YPelsPerMeter int32
+	ClrUsed       uint32
+	ClrImportant  uint32
+}
+
+type BITMAPINFO struct {
+	Header BITMAPINFOHEADER
+	Colors [256]uint32 // Maximum palette size for 8-bit images
+}
 
 // WindowsClipboardReader implements Reader interface for Windows platform
 type WindowsClipboardReader struct{}
@@ -34,17 +76,108 @@ func (r *WindowsClipboardReader) ReadText() (string, error) {
 	return text, nil
 }
 
-// ReadImage reads image data from clipboard
+// ReadImage reads image data from clipboard using Windows API
 func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
-	// Note: The atotto/clipboard library doesn't support image reading directly
-	// For Windows, we would need to use Win32 API calls
-	// For now, we'll implement a basic approach and enhance later
+	// Open clipboard
+	ret, _, err := procOpenClipboard.Call(0)
+	if ret == 0 {
+		return nil, fmt.Errorf("failed to open clipboard: %v", err)
+	}
+	defer procCloseClipboard.Call()
 
-	// This is a placeholder implementation
-	// In a real implementation, you would use platform-specific APIs
-	// like golang.org/x/sys/windows for Windows clipboard image access
+	// Check if DIB format is available
+	ret, _, err = procIsClipboardFormatAvailable.Call(uintptr(CF_DIB))
+	if ret == 0 {
+		return nil, fmt.Errorf("no image data in clipboard")
+	}
 
-	return nil, fmt.Errorf("image clipboard reading not yet implemented - requires platform-specific API integration")
+	// Get clipboard data handle
+	handle, _, err := procGetClipboardData.Call(uintptr(CF_DIB))
+	if handle == 0 {
+		return nil, fmt.Errorf("failed to get clipboard data: %v", err)
+	}
+
+	// Lock the global memory to get a pointer
+	pointer, _, err := procGlobalLock.Call(handle)
+	if pointer == 0 {
+		return nil, fmt.Errorf("failed to lock global memory: %v", err)
+	}
+	defer procGlobalUnlock.Call(handle)
+
+	// Get the size of the data
+	size, _, err := procGlobalSize.Call(handle)
+	if size == 0 {
+		return nil, fmt.Errorf("failed to get global memory size: %v", err)
+	}
+
+	// Read the DIB data
+	data := make([]byte, size)
+	copy(data, (*[1 << 30]byte)(unsafe.Pointer(pointer))[:size:size])
+
+	// Parse BITMAPINFOHEADER
+	if len(data) < int(unsafe.Sizeof(BITMAPINFOHEADER{})) {
+		return nil, fmt.Errorf("insufficient data for BITMAPINFOHEADER")
+	}
+
+	header := (*BITMAPINFOHEADER)(unsafe.Pointer(&data[0]))
+
+	// Calculate image properties
+	width := int(header.Width)
+	height := int(header.Height)
+	if height < 0 {
+		height = -height // Top-down bitmap
+	}
+
+	// Calculate stride (bytes per row)
+	var stride int
+	switch header.BitCount {
+	case 32:
+		stride = width * 4
+	case 24:
+		stride = ((width * 3 + 3) / 4) * 4 // Align to 4 bytes
+	case 8:
+		stride = ((width + 3) / 4) * 4 // Align to 4 bytes
+	default:
+		return nil, fmt.Errorf("unsupported bit count: %d", header.BitCount)
+	}
+
+	// Find the start of pixel data (after BITMAPINFOHEADER and palette)
+	offset := int(unsafe.Sizeof(BITMAPINFOHEADER{}))
+	if header.BitCount == 8 {
+		offset += 256 * 4 // Palette for 8-bit images
+	}
+
+	if offset >= len(data) {
+		return nil, fmt.Errorf("invalid DIB data structure")
+	}
+
+	// Extract pixel data
+	pixelData := data[offset:]
+	if len(pixelData) < stride*height {
+		return nil, fmt.Errorf("insufficient pixel data")
+	}
+
+	// Convert to Go image format
+	var img image.Image
+	switch header.BitCount {
+	case 32:
+		img = r.convertBGRAtoRGBA(pixelData, width, height, stride)
+	case 24:
+		img = r.convertBGRtoRGB(pixelData, width, height, stride)
+	case 8:
+		img = r.convert8BitToRGBA(pixelData, data[offset-256*4:offset], width, height, stride)
+	default:
+		return nil, fmt.Errorf("unsupported bit count: %d", header.BitCount)
+	}
+
+	// Encode as PNG
+	var buf bytes.Buffer
+	err = png.Encode(&buf, img)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode image as PNG: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 // HasContent checks if clipboard has any readable content
@@ -55,7 +188,19 @@ func (r *WindowsClipboardReader) HasContent() (bool, error) {
 		return true, nil
 	}
 
-	// TODO: Add image content detection when image reading is implemented
+	// Check for image content
+	ret, _, err := procOpenClipboard.Call(0)
+	if ret == 0 {
+		// Can't open clipboard, likely empty or access denied
+		return false, nil
+	}
+	defer procCloseClipboard.Call()
+
+	// Check if image format is available
+	ret, _, _ = procIsClipboardFormatAvailable.Call(uintptr(CF_DIB))
+	if ret != 0 {
+		return true, nil
+	}
 
 	return false, nil
 }
@@ -68,7 +213,19 @@ func (r *WindowsClipboardReader) GetContentType() (models.ContentType, error) {
 		return models.ContentTypeText, nil
 	}
 
-	// TODO: Add image content detection when image reading is implemented
+	// Check for image content
+	ret, _, err := procOpenClipboard.Call(0)
+	if ret == 0 {
+		// Can't open clipboard, likely empty or access denied
+		return models.ContentTypeEmpty, nil
+	}
+	defer procCloseClipboard.Call()
+
+	// Check if image format is available
+	ret, _, _ = procIsClipboardFormatAvailable.Call(uintptr(CF_DIB))
+	if ret != 0 {
+		return models.ContentTypeImage, nil
+	}
 
 	// If no content found, return empty
 	return models.ContentTypeEmpty, nil
@@ -96,6 +253,75 @@ func (r *WindowsClipboardReader) Read() (*models.ClipboardContent, error) {
 	}
 
 	return nil, fmt.Errorf("no readable content found in clipboard")
+}
+
+// convertBGRAtoRGBA converts 32-bit BGRA pixel data to RGBA image
+func (r *WindowsClipboardReader) convertBGRAtoRGBA(pixelData []byte, width, height, stride int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			srcOffset := y*stride + x*4
+			dstOffset := y*img.Stride + x*4
+
+			if srcOffset+3 < len(pixelData) && dstOffset+3 < len(img.Pix) {
+				// Convert BGRA to RGBA
+				img.Pix[dstOffset+0] = pixelData[srcOffset+2] // R
+				img.Pix[dstOffset+1] = pixelData[srcOffset+1] // G
+				img.Pix[dstOffset+2] = pixelData[srcOffset+0] // B
+				img.Pix[dstOffset+3] = pixelData[srcOffset+3] // A
+			}
+		}
+	}
+
+	return img
+}
+
+// convertBGRtoRGB converts 24-bit BGR pixel data to RGB image
+func (r *WindowsClipboardReader) convertBGRtoRGB(pixelData []byte, width, height, stride int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			srcOffset := y*stride + x*3
+			dstOffset := y*img.Stride + x*4
+
+			if srcOffset+2 < len(pixelData) && dstOffset+3 < len(img.Pix) {
+				// Convert BGR to RGBA
+				img.Pix[dstOffset+0] = pixelData[srcOffset+2] // R
+				img.Pix[dstOffset+1] = pixelData[srcOffset+1] // G
+				img.Pix[dstOffset+2] = pixelData[srcOffset+0] // B
+				img.Pix[dstOffset+3] = 0xFF                   // A (fully opaque)
+			}
+		}
+	}
+
+	return img
+}
+
+// convert8BitToRGBA converts 8-bit palette pixel data to RGBA image
+func (r *WindowsClipboardReader) convert8BitToRGBA(pixelData, palette []byte, width, height, stride int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			srcOffset := y*stride + x
+			dstOffset := y*img.Stride + x*4
+
+			if srcOffset < len(pixelData) && dstOffset+3 < len(img.Pix) {
+				palIndex := int(pixelData[srcOffset]) * 4
+				if palIndex+3 < len(palette) {
+					// Convert BGR palette to RGBA
+					img.Pix[dstOffset+0] = palette[palIndex+2] // R
+					img.Pix[dstOffset+1] = palette[palIndex+1] // G
+					img.Pix[dstOffset+2] = palette[palIndex+0] // B
+					img.Pix[dstOffset+3] = 0xFF                  // A (fully opaque)
+				}
+			}
+		}
+	}
+
+	return img
 }
 
 // EnhancedClipboardReader implements advanced clipboard functionality
