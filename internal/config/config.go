@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,6 +57,11 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 	if err := config.Reminder.Validate(); err != nil {
 		return nil, fmt.Errorf("reminder configuration validation failed: %w", err)
 	}
+
+	// 添加配置状态日志
+	log.Printf("提醒配置加载完成:")
+	log.Printf("  默认提醒时间: %s", config.Reminder.DefaultRemindBefore)
+	log.Printf("  智能提醒功能: %t", config.Reminder.EnableSmartReminder)
 
 	return &config, nil
 }

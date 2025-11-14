@@ -287,11 +287,23 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 			}
 		}
 
-		parsedReminder, err := models.ParseReminderTime(*reminder, timezone)
+		// 添加调试日志
+		if reminder.RemindBefore != "" {
+			fmt.Printf("  📝 用户设置的提醒时间: %s\n", reminder.RemindBefore)
+		} else {
+			fmt.Printf("  ⚠️  用户未设置提醒时间，将使用默认值\n")
+		}
+
+		parsedReminder, err := models.ParseReminderTimeWithConfig(*reminder, timezone, &serverConfig.Reminder)
 		if err != nil {
 			fmt.Printf("  ❌ Failed to parse time: %v\n", err)
 			continue
 		}
+
+		// 添加结果日志
+		fmt.Printf("  ✅ 最终提醒时间: %s (截止: %s)\n",
+			parsedReminder.AlarmTime.Format("2006-01-02 15:04"),
+			parsedReminder.DueTime.Format("2006-01-02 15:04"))
 
 		// Get or create task list
 		listName := parsedReminder.Original.List
@@ -783,10 +795,22 @@ func handleClipUpload() {
 		}
 	}
 
-	parsedReminder, err := models.ParseReminderTime(*processingResult.Reminder, timezone)
+	// 添加调试日志
+	if processingResult.Reminder.RemindBefore != "" {
+		fmt.Printf("  📝 用户设置的提醒时间: %s\n", processingResult.Reminder.RemindBefore)
+	} else {
+		fmt.Printf("  ⚠️  用户未设置提醒时间，将使用默认值\n")
+	}
+
+	parsedReminder, err := models.ParseReminderTimeWithConfig(*processingResult.Reminder, timezone, &serverConfig.Reminder)
 	if err != nil {
 		log.Fatalf("Failed to parse reminder time: %v", err)
 	}
+
+	// 添加结果日志
+	fmt.Printf("  ✅ 最终提醒时间: %s (截止: %s)\n",
+		parsedReminder.AlarmTime.Format("2006-01-02 15:04"),
+		parsedReminder.DueTime.Format("2006-01-02 15:04"))
 
 	// Get or create task list
 	listName := parsedReminder.Original.List

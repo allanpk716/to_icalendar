@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"time"
 )
@@ -60,19 +61,25 @@ func (c *ReminderConfig) Validate() error {
 
 // GetSmartRemindTime 根据优先级获取智能提醒时间
 func (c *ReminderConfig) GetSmartRemindTime(priority Priority) string {
+	// 首先检查是否启用智能提醒
 	if !c.EnableSmartReminder {
+		log.Printf("智能提醒功能已禁用，使用默认提醒时间: %s", c.DefaultRemindBefore)
 		return c.DefaultRemindBefore
 	}
 
 	// 根据优先级调整提醒时间
 	switch priority {
 	case PriorityHigh:
+		log.Printf("高优先级任务，使用智能提醒时间: 30m")
 		return "30m" // 高优先级任务提前30分钟
 	case PriorityMedium:
+		log.Printf("中优先级任务，使用智能提醒时间: 15m")
 		return "15m" // 中优先级任务提前15分钟
 	case PriorityLow:
+		log.Printf("低优先级任务，使用智能提醒时间: 5m")
 		return "5m"  // 低优先级任务提前5分钟
 	default:
+		log.Printf("未知优先级，使用默认提醒时间: %s", c.DefaultRemindBefore)
 		return c.DefaultRemindBefore
 	}
 }
@@ -173,8 +180,12 @@ func ParseReminderTimeWithConfig(reminder Reminder, timezone *time.Location, con
 			// 使用配置中的智能提醒时间
 			remindBefore = config.GetSmartRemindTime(reminder.Priority)
 		} else {
+			log.Printf("配置为空，使用默认提醒时间: 15m")
 			remindBefore = "15m" // 默认提前15分钟
 		}
+	} else {
+		// 用户已明确设置remind_before，记录但不覆盖
+		log.Printf("用户设置的提醒时间: %s，将优先使用用户设置", remindBefore)
 	}
 
 	alarmTime, err := parseDuration(dueTime, remindBefore)
