@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -375,34 +377,102 @@ func isValidDate(dateStr string) bool {
 
 // isValidTime checks if the time string is in valid format (HH:MM)
 func isValidTime(timeStr string) bool {
-	if len(timeStr) != 5 {
-		return false
+	// 首先尝试解析时间范围，如果是时间范围格式，提取开始时间
+	if processedTime := parseTimeFromRange(timeStr); processedTime != timeStr {
+		// 是时间范围格式，验证提取出的开始时间
+		timeStr = processedTime
 	}
-
-	if timeStr[2] != ':' {
-		return false
-	}
-
-	// 简单验证数字格式
-	hours := timeStr[:2]
-	minutes := timeStr[3:]
-
-	for _, char := range hours {
-		if char < '0' || char > '9' {
+	
+	// 验证单个时间格式（支持HH:MM和H:MM）
+	if len(timeStr) == 4 || len(timeStr) == 5 {
+		// 查找冒号位置
+		var colonIndex int
+		if len(timeStr) == 5 && timeStr[2] == ':' {
+			colonIndex = 2
+		} else if len(timeStr) == 4 && timeStr[1] == ':' {
+			colonIndex = 1
+		} else {
 			return false
 		}
-	}
-
-	for _, char := range minutes {
-		if char < '0' || char > '9' {
+		
+		// 确保冒号数量正确
+		if strings.Count(timeStr, ":") != 1 {
 			return false
 		}
+		
+		// 验证小时部分
+		hours := timeStr[:colonIndex]
+		minutes := timeStr[colonIndex+1:]
+		
+		// 验证小时部分都是数字
+		for _, char := range hours {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+		
+		// 验证分钟部分都是数字且长度为2
+		if len(minutes) != 2 {
+			return false
+		}
+		for _, char := range minutes {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+		
+		// 验证时间值的有效性
+		if hour, err := strconv.Atoi(hours); err == nil {
+			if minute, err := strconv.Atoi(minutes); err == nil {
+				return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
+			}
+		}
 	}
-
-	return true
+	
+	return false
 }
 
 // getErrorMessage extracts error message from validation result
+// parseTimeFromRange 从时间字符串中解析时间，支持时间范围格式
+// 如果输入是时间范围（如"14:30 - 16:30"），返回开始时间"14:30"
+// 如果输入是单个时间，直接返回
+// parseTimeFromRange 从时间字符串中解析时间，支持时间范围格式
+// 如果输入是时间范围（如"14:30 - 16:30"），返回开始时间"14:30"
+// 如果输入是单个时间，直接返回
+func parseTimeFromRange(timeStr string) string {
+	// 定义时间范围分隔符模式，确保是真正的时间范围
+	rangePatterns := []string{
+		`^(\d{1,2}:\d{2})\s*[-~~到至]\s*(\d{1,2}:\d{2})\s*$`,   // 14:30-16:30, 14:30~16:30, 14:30到16:30, 14:30至16:30
+	}
+	
+	for _, pattern := range rangePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			if matches := re.FindStringSubmatch(timeStr); len(matches) > 2 {
+				startTime := matches[1]
+				endTime := matches[2]
+				// 验证开始时间格式是否有效
+				if isValidTimeFormat(startTime) && isValidTimeFormat(endTime) {
+					return startTime
+				}
+			}
+		}
+	}
+	
+	// 如果不是时间范围，返回原始字符串
+	return timeStr
+}
+
+// isValidTimeFormat 验证时间格式是否有效 (HH:MM 或 H:MM)
+func isValidTimeFormat(timeStr string) bool {
+	formats := []string{"15:04", "3:04"}
+	for _, format := range formats {
+		if _, err := time.Parse(format, timeStr); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func getErrorMessage(validation *ValidationResult, info *models.ParsedTaskInfo) string {
 	if validation.IsValid {
 		return ""

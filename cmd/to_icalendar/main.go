@@ -820,7 +820,7 @@ func handleClipUpload() {
 	if parsedReminder.AlarmTime.Before(parsedReminder.DueTime) {
 		fmt.Printf("  Reminder: %s\n", parsedReminder.AlarmTime.Format("2006-01-02 15:04"))
 	}
-	fmt.Printf("  Priority: %s\n", parsedReminder.Priority)
+	fmt.Printf("  Priority: %d\n", parsedReminder.Priority)
 
 	fmt.Println("\n🎉 Clip-upload completed successfully!")
 	fmt.Println("The task has been added to your Microsoft Todo list.")

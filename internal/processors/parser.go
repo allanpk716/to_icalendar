@@ -310,6 +310,10 @@ func (tp *TaskParser) normalizeDate(dateStr string) string {
 
 // normalizeTime normalizes time to HH:MM format
 func (tp *TaskParser) normalizeTime(timeStr string) string {
+	// 首先检查是否是时间范围格式 (例如: "14:30 - 16:30", "14:30-16:30", "14:30~16:30")
+	if rangeStartTime := tp.extractTimeFromRange(timeStr); rangeStartTime != "" {
+		return rangeStartTime
+	}
 
 	// 处理相对时间
 	switch strings.ToLower(timeStr) {
@@ -356,6 +360,52 @@ func (tp *TaskParser) normalizeTime(timeStr string) string {
 	}
 
 	return timeStr // 返回原始字符串
+}
+
+// extractTimeFromRange 从时间范围字符串中提取开始时间
+// 支持格式: "14:30 - 16:30", "14:30-16:30", "14:30~16:30", "14:30到16:30" 等
+func (tp *TaskParser) extractTimeFromRange(timeStr string) string {
+	// 定义时间范围分隔符模式
+	rangePatterns := []string{
+		`^(\d{1,2}:\d{2})\s*[-~~到至]\s*(\d{1,2}:\d{2})$`,     // 14:30-16:30, 14:30~16:30, 14:30到16:30, 14:30至16:30
+		`^(\d{1,2}:\d{2})\s*[-~到至]\s*(\d{1,2}:\d{2})$`,       // 14:30 - 16:30 (带空格)
+		`^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$`,             // 14:30 - 16:30
+	}
+	
+	for _, pattern := range rangePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			if matches := re.FindStringSubmatch(timeStr); len(matches) > 1 {
+				startTime := matches[1]
+				// 验证开始时间格式是否有效
+				if tp.isValidTimeFormat(startTime) {
+					return startTime
+				}
+			}
+		}
+	}
+	
+	// 尝试更宽松的匹配：只提取第一个有效的时间格式
+	timeRegex := regexp.MustCompile(`\d{1,2}:\d{2}`)
+	matches := timeRegex.FindAllString(timeStr, 2)
+	if len(matches) > 0 {
+		// 返回第一个匹配的时间（开始时间）
+		if tp.isValidTimeFormat(matches[0]) {
+			return matches[0]
+		}
+	}
+	
+	return "" // 不是时间范围格式
+}
+
+// isValidTimeFormat 验证时间格式是否有效 (HH:MM 或 H:MM)
+func (tp *TaskParser) isValidTimeFormat(timeStr string) bool {
+	formats := []string{"15:04", "3:04"}
+	for _, format := range formats {
+		if _, err := time.Parse(format, timeStr); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizePriority normalizes priority to standard values

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/models"
@@ -91,10 +92,11 @@ func (cm *ConfigManager) LoadReminder(reminderPath string) (*models.Reminder, er
 		return nil, fmt.Errorf("invalid date format, expected YYYY-MM-DD: %w", err)
 	}
 
-	// 验证时间格式
-	_, err = time.Parse("15:04", reminder.Time)
+	// 验证时间格式（支持时间范围）
+	processedTime := parseTimeFromRange(reminder.Time)
+	_, err = time.Parse("15:04", processedTime)
 	if err != nil {
-		return nil, fmt.Errorf("invalid time format, expected HH:MM: %w", err)
+		return nil, fmt.Errorf("invalid time format, expected HH:MM or time range like HH:MM - HH:MM: %w", err)
 	}
 
 	// 验证优先级
@@ -219,4 +221,51 @@ func (cm *ConfigManager) CreateReminderTemplate(reminderPath string) error {
 	}
 
 	return nil
+}
+
+// parseTimeFromRange 从时间字符串中解析时间，支持时间范围格式
+// 如果输入是时间范围（如"14:30 - 16:30"），返回开始时间"14:30"
+// 如果输入是单个时间，直接返回
+func parseTimeFromRange(timeStr string) string {
+	// 定义时间范围分隔符模式
+	rangePatterns := []string{
+		`^(\d{1,2}:\d{2})\s*[-~~到至]\s*(\d{1,2}:\d{2})$`,     // 14:30-16:30, 14:30~16:30, 14:30到16:30, 14:30至16:30
+		`^(\d{1,2}:\d{2})\s*[-~到至]\s*(\d{1,2}:\d{2})$`,       // 14:30 - 16:30 (带空格)
+		`^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$`,             // 14:30 - 16:30
+	}
+	
+	for _, pattern := range rangePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			if matches := re.FindStringSubmatch(timeStr); len(matches) > 1 {
+				startTime := matches[1]
+				// 验证开始时间格式是否有效
+				if isValidTimeFormat(startTime) {
+					return startTime
+				}
+			}
+		}
+	}
+	
+	// 尝试更宽松的匹配：只提取第一个有效的时间格式
+	timeRegex := regexp.MustCompile(`\d{1,2}:\d{2}`)
+	matches := timeRegex.FindAllString(timeStr, 2)
+	if len(matches) > 0 {
+		// 返回第一个匹配的时间（开始时间）
+		if isValidTimeFormat(matches[0]) {
+			return matches[0]
+		}
+	}
+	
+	return timeStr // 不是时间范围格式，返回原始字符串
+}
+
+// isValidTimeFormat 验证时间格式是否有效 (HH:MM 或 H:MM)
+func isValidTimeFormat(timeStr string) bool {
+	formats := []string{"15:04", "3:04"}
+	for _, format := range formats {
+		if _, err := time.Parse(format, timeStr); err == nil {
+			return true
+		}
+	}
+	return false
 }

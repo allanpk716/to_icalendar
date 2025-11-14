@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -60,9 +61,59 @@ type ParsedReminder struct {
 // ParseReminderTime parses time information from a reminder and creates a ParsedReminder.
 // It converts date/time strings, calculates alarm times, and formats priority values.
 // Returns a ParsedReminder with calculated times and formatted strings, or an error if parsing fails.
+// parseTimeFromRange 从时间字符串中解析时间，支持时间范围格式
+// 如果输入是时间范围（如"14:30 - 16:30"），返回开始时间"14:30"
+// 如果输入是单个时间，直接返回
+func parseTimeFromRange(timeStr string) string {
+	// 定义时间范围分隔符模式
+	rangePatterns := []string{
+		`^(\d{1,2}:\d{2})\s*[-~~到至]\s*(\d{1,2}:\d{2})$`,     // 14:30-16:30, 14:30~16:30, 14:30到16:30, 14:30至16:30
+		`^(\d{1,2}:\d{2})\s*[-~到至]\s*(\d{1,2}:\d{2})$`,       // 14:30 - 16:30 (带空格)
+		`^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$`,             // 14:30 - 16:30
+	}
+	
+	for _, pattern := range rangePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			if matches := re.FindStringSubmatch(timeStr); len(matches) > 1 {
+				startTime := matches[1]
+				// 验证开始时间格式是否有效
+				if isValidTimeFormat(startTime) {
+					return startTime
+				}
+			}
+		}
+	}
+	
+	// 尝试更宽松的匹配：只提取第一个有效的时间格式
+	timeRegex := regexp.MustCompile(`\d{1,2}:\d{2}`)
+	matches := timeRegex.FindAllString(timeStr, 2)
+	if len(matches) > 0 {
+		// 返回第一个匹配的时间（开始时间）
+		if isValidTimeFormat(matches[0]) {
+			return matches[0]
+		}
+	}
+	
+	return timeStr // 不是时间范围格式，返回原始字符串
+}
+
+// isValidTimeFormat 验证时间格式是否有效 (HH:MM 或 H:MM)
+func isValidTimeFormat(timeStr string) bool {
+	formats := []string{"15:04", "3:04"}
+	for _, format := range formats {
+		if _, err := time.Parse(format, timeStr); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedReminder, error) {
+	// 处理时间范围，提取开始时间
+	processedTime := parseTimeFromRange(reminder.Time)
+	
 	// 解析日期和时间
-	dateTimeStr := reminder.Date + " " + reminder.Time
+	dateTimeStr := reminder.Date + " " + processedTime
 	dueTime, err := time.ParseInLocation("2006-01-02 15:04", dateTimeStr, timezone)
 	if err != nil {
 		return nil, err
