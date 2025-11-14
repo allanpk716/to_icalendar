@@ -3,14 +3,16 @@ package clipboard
 import (
 	"bytes"
 	"fmt"
-	"image"
+	stdimage "image"
 	"image/png"
 	"time"
 	"unsafe"
 
+	"github.com/allanpk716/to_icalendar/internal/image"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/atotto/clipboard"
 	"github.com/disintegration/imaging"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 )
 
@@ -55,11 +57,41 @@ type BITMAPINFO struct {
 }
 
 // WindowsClipboardReader implements Reader interface for Windows platform
-type WindowsClipboardReader struct{}
+type WindowsClipboardReader struct {
+	normalizer    *image.ImageNormalizer
+	logger        *logrus.Logger
+	configManager *image.ConfigManager
+}
 
 // NewClipboardReader creates a new clipboard reader based on the platform
 func NewClipboardReader() (Reader, error) {
-	return &WindowsClipboardReader{}, nil
+	logger := logrus.New()
+	configManager := image.NewConfigManager(".", logger)
+	if err := configManager.LoadConfig(); err != nil {
+		logger.Warnf("加载图片处理配置失败: %v", err)
+	}
+
+	return &WindowsClipboardReader{
+		logger:        logger,
+		configManager: configManager,
+	}, nil
+}
+
+// NewClipboardReaderWithNormalizer creates a new clipboard reader with image normalizer
+func NewClipboardReaderWithNormalizer(normalizer *image.ImageNormalizer, logger *logrus.Logger) (Reader, error) {
+	if logger == nil {
+		logger = logrus.New()
+	}
+	configManager := image.NewConfigManager(".", logger)
+	if err := configManager.LoadConfig(); err != nil {
+		logger.Warnf("加载图片处理配置失败: %v", err)
+	}
+
+	return &WindowsClipboardReader{
+		normalizer:    normalizer,
+		logger:        logger,
+		configManager: configManager,
+	}, nil
 }
 
 // ReadText reads text content from clipboard
@@ -158,7 +190,7 @@ func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
 	}
 
 	// Convert to Go image format
-	var img image.Image
+	var img stdimage.Image
 	switch header.BitCount {
 	case 32:
 		img = r.convertBGRAtoRGBA(pixelData, width, height, stride)
@@ -170,6 +202,20 @@ func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
 		return nil, fmt.Errorf("unsupported bit count: %d", header.BitCount)
 	}
 
+	r.logger.Debugf("原始图片尺寸: %dx%d, 位深度: %d", width, height, header.BitCount)
+
+	// Apply image normalization if available
+	if r.normalizer != nil {
+		r.logger.Debug("应用图片标准化处理")
+		normalizedImg, err := r.normalizer.NormalizeImage(img)
+		if err != nil {
+			r.logger.Warnf("图片标准化失败，使用原始图片: %v", err)
+		} else {
+			img = normalizedImg
+			r.logger.Debugf("标准化后图片尺寸: %dx%d", img.Bounds().Dx(), img.Bounds().Dy())
+		}
+	}
+
 	// Encode as PNG
 	var buf bytes.Buffer
 	err = png.Encode(&buf, img)
@@ -177,7 +223,27 @@ func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
 		return nil, fmt.Errorf("failed to encode image as PNG: %w", err)
 	}
 
-	return buf.Bytes(), nil
+	r.logger.Debugf("最终PNG图片大小: %d bytes", buf.Len())
+
+	// 缓存原始图片（在标准化之前）
+	finalImageData := buf.Bytes()
+	if r.configManager != nil && r.configManager.IsCacheEnabled() {
+		timestamp := time.Now().Format("20060102_150405_000000")
+		originalFilename := fmt.Sprintf("clipboard_original_%s.png", timestamp)
+
+		// 重新生成原始图片数据（未标准化的）
+		var originalBuf bytes.Buffer
+		if err := png.Encode(&originalBuf, img); err == nil {
+			cachePath, err := r.configManager.SaveCacheImage(originalBuf.Bytes(), originalFilename)
+			if err != nil {
+				r.logger.Warnf("缓存原始图片失败: %v", err)
+			} else {
+				r.logger.Infof("原始图片已缓存: %s", cachePath)
+			}
+		}
+	}
+
+	return finalImageData, nil
 }
 
 // HasContent checks if clipboard has any readable content
@@ -256,12 +322,14 @@ func (r *WindowsClipboardReader) Read() (*models.ClipboardContent, error) {
 }
 
 // convertBGRAtoRGBA converts 32-bit BGRA pixel data to RGBA image
-func (r *WindowsClipboardReader) convertBGRAtoRGBA(pixelData []byte, width, height, stride int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+func (r *WindowsClipboardReader) convertBGRAtoRGBA(pixelData []byte, width, height, stride int) *stdimage.RGBA {
+	img := stdimage.NewRGBA(stdimage.Rect(0, 0, width, height))
 
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			srcOffset := y*stride + x*4
+			// Windows DIB is stored bottom-to-top, so we need to flip the Y coordinate
+			srcY := height - 1 - y
+			srcOffset := srcY*stride + x*4
 			dstOffset := y*img.Stride + x*4
 
 			if srcOffset+3 < len(pixelData) && dstOffset+3 < len(img.Pix) {
@@ -274,16 +342,19 @@ func (r *WindowsClipboardReader) convertBGRAtoRGBA(pixelData []byte, width, heig
 		}
 	}
 
+	r.logger.Debugf("BGRA图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
 	return img
 }
 
 // convertBGRtoRGB converts 24-bit BGR pixel data to RGB image
-func (r *WindowsClipboardReader) convertBGRtoRGB(pixelData []byte, width, height, stride int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+func (r *WindowsClipboardReader) convertBGRtoRGB(pixelData []byte, width, height, stride int) *stdimage.RGBA {
+	img := stdimage.NewRGBA(stdimage.Rect(0, 0, width, height))
 
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			srcOffset := y*stride + x*3
+			// Windows DIB is stored bottom-to-top, so we need to flip the Y coordinate
+			srcY := height - 1 - y
+			srcOffset := srcY*stride + x*3
 			dstOffset := y*img.Stride + x*4
 
 			if srcOffset+2 < len(pixelData) && dstOffset+3 < len(img.Pix) {
@@ -296,16 +367,19 @@ func (r *WindowsClipboardReader) convertBGRtoRGB(pixelData []byte, width, height
 		}
 	}
 
+	r.logger.Debugf("BGR图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
 	return img
 }
 
 // convert8BitToRGBA converts 8-bit palette pixel data to RGBA image
-func (r *WindowsClipboardReader) convert8BitToRGBA(pixelData, palette []byte, width, height, stride int) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+func (r *WindowsClipboardReader) convert8BitToRGBA(pixelData, palette []byte, width, height, stride int) *stdimage.RGBA {
+	img := stdimage.NewRGBA(stdimage.Rect(0, 0, width, height))
 
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			srcOffset := y*stride + x
+			// Windows DIB is stored bottom-to-top, so we need to flip the Y coordinate
+			srcY := height - 1 - y
+			srcOffset := srcY*stride + x
 			dstOffset := y*img.Stride + x*4
 
 			if srcOffset < len(pixelData) && dstOffset+3 < len(img.Pix) {
@@ -321,6 +395,7 @@ func (r *WindowsClipboardReader) convert8BitToRGBA(pixelData, palette []byte, wi
 		}
 	}
 
+	r.logger.Debugf("8位调色板图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
 	return img
 }
 
@@ -340,7 +415,7 @@ func NewEnhancedClipboardReader() (*EnhancedClipboardReader, error) {
 // ProcessImage processes image data for better compatibility
 func ProcessImage(imageData []byte, format string) ([]byte, error) {
 	// Decode the image
-	img, _, err := image.Decode(bytes.NewReader(imageData))
+	img, _, err := stdimage.Decode(bytes.NewBuffer(imageData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode image: %w", err)
 	}

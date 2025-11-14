@@ -2,3 +2,5 @@
 /config
 /to_icalendar
 /cmd/test_dify/test-images
+*cache/images/*
+/cmd/to_icalendar/cache/images

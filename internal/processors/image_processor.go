@@ -6,16 +6,22 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/dify"
+	"github.com/allanpk716/to_icalendar/internal/image"
 	"github.com/allanpk716/to_icalendar/internal/models"
+	"github.com/sirupsen/logrus"
 )
 
 // ImageProcessor handles image content processing workflow
 type ImageProcessor struct {
-	difyProcessor *dify.Processor
-	tempDir       string
+	difyProcessor  *dify.Processor
+	tempDir        string
+	normalizer     *image.ImageNormalizer
+	configManager  *image.ConfigManager
+	logger         *logrus.Logger
 }
 
 // NewImageProcessor creates a new image processor
@@ -26,9 +32,40 @@ func NewImageProcessor(difyProcessor *dify.Processor) (*ImageProcessor, error) {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
+	logger := logrus.New()
+	configManager := image.NewConfigManager(".", logger)
+	if err := configManager.LoadConfig(); err != nil {
+		log.Printf("加载图片处理配置失败: %v", err)
+	}
+
 	return &ImageProcessor{
 		difyProcessor: difyProcessor,
 		tempDir:       tempDir,
+		configManager: configManager,
+		logger:        logger,
+	}, nil
+}
+
+// NewImageProcessorWithNormalizer creates a new image processor with image normalizer
+func NewImageProcessorWithNormalizer(difyProcessor *dify.Processor, normalizer *image.ImageNormalizer) (*ImageProcessor, error) {
+	// 创建临时目录
+	tempDir := filepath.Join(os.TempDir(), "to_icalendar_images")
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	logger := logrus.New()
+	configManager := image.NewConfigManager(".", logger)
+	if err := configManager.LoadConfig(); err != nil {
+		log.Printf("加载图片处理配置失败: %v", err)
+	}
+
+	return &ImageProcessor{
+		difyProcessor: difyProcessor,
+		tempDir:       tempDir,
+		normalizer:    normalizer,
+		configManager: configManager,
+		logger:        logger,
 	}, nil
 }
 
@@ -51,8 +88,34 @@ func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData [
 	fileName := fmt.Sprintf("clipboard_%s.png", time.Now().Format("20060102_150405"))
 	tempFilePath := filepath.Join(ip.tempDir, fileName)
 
+	// 应用图片标准化（如果可用）
+	processedImageData := imageData
+	if ip.normalizer != nil {
+		log.Printf("应用图片标准化处理")
+		normalizedData, err := ip.normalizeImageData(imageData, tempFilePath)
+		if err != nil {
+			log.Printf("图片标准化失败，使用原始图片: %v", err)
+		} else {
+			processedImageData = normalizedData
+			log.Printf("图片标准化完成，处理后大小: %d bytes", len(processedImageData))
+
+			// 缓存标准化后的图片
+			if ip.configManager != nil && ip.configManager.IsCacheEnabled() {
+				timestamp := time.Now().Format("20060102_150405_000000")
+				normalizedFilename := fmt.Sprintf("clipboard_normalized_%s.png", timestamp)
+
+				cachePath, err := ip.configManager.SaveCacheImage(normalizedData, normalizedFilename)
+				if err != nil {
+					log.Printf("缓存标准化图片失败: %v", err)
+				} else {
+					log.Printf("标准化图片已缓存: %s", cachePath)
+				}
+			}
+		}
+	}
+
 	// 保存图片到临时文件
-	if err := ip.saveImageToTempFile(imageData, tempFilePath); err != nil {
+	if err := ip.saveImageToTempFile(processedImageData, tempFilePath); err != nil {
 		return &models.ProcessingResult{
 			Success:      false,
 			ErrorMessage: fmt.Sprintf("保存临时文件失败: %v", err),
@@ -70,7 +133,7 @@ func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData [
 	log.Printf("图片已保存到临时文件: %s", tempFilePath)
 
 	// 使用Dify处理器处理图片
-	response, err := ip.difyProcessor.ProcessImage(ctx, imageData, fileName)
+	response, err := ip.difyProcessor.ProcessImage(ctx, processedImageData, fileName)
 	if err != nil {
 		return &models.ProcessingResult{
 			Success:        false,
@@ -206,6 +269,38 @@ func (ip *ImageProcessor) ValidateImage(imageData []byte) error {
 	return nil
 }
 
+// normalizeImageData 标准化图片数据
+func (ip *ImageProcessor) normalizeImageData(imageData []byte, tempFilePath string) ([]byte, error) {
+	if ip.normalizer == nil {
+		return imageData, nil
+	}
+
+	// 先保存原始图片到临时文件
+	if err := ip.saveImageToTempFile(imageData, tempFilePath); err != nil {
+		return nil, fmt.Errorf("保存原始图片失败: %w", err)
+	}
+
+	// 生成标准化后的临时文件路径
+	normalizedPath := strings.TrimSuffix(tempFilePath, filepath.Ext(tempFilePath)) + "_normalized.png"
+
+	// 标准化图片文件
+	err := ip.normalizer.NormalizeFile(tempFilePath, normalizedPath)
+	if err != nil {
+		return nil, fmt.Errorf("图片标准化失败: %w", err)
+	}
+
+	// 读取标准化后的图片
+	normalizedData, err := os.ReadFile(normalizedPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取标准化图片失败: %w", err)
+	}
+
+	// 清理标准化临时文件
+	os.Remove(normalizedPath)
+
+	return normalizedData, nil
+}
+
 // saveImageToTempFile saves image data to a temporary file
 func (ip *ImageProcessor) saveImageToTempFile(imageData []byte, filePath string) error {
 	return os.WriteFile(filePath, imageData, 0644)
@@ -276,6 +371,22 @@ func (ip *ImageProcessor) IsFormatSupported(format string) bool {
 		if supported == format {
 			return true
 		}
+	}
+	return false
+}
+
+// GetCacheDir returns the cache directory path
+func (ip *ImageProcessor) GetCacheDir() string {
+	if ip.configManager != nil {
+		return ip.configManager.GetCacheDir()
+	}
+	return ""
+}
+
+// IsCacheEnabled checks if caching is enabled
+func (ip *ImageProcessor) IsCacheEnabled() bool {
+	if ip.configManager != nil {
+		return ip.configManager.IsCacheEnabled()
 	}
 	return false
 }
