@@ -333,9 +333,18 @@ func (p *Processor) createReminderFromParsedInfo(info *models.ParsedTaskInfo) *m
 		List:         info.List,
 	}
 
-	// 设置默认值
+	// 【关键修改】强制使用配置文件的默认提醒时间
+	if p.options != nil && p.options.DefaultRemindBefore != "" {
+		reminder.RemindBefore = p.options.DefaultRemindBefore
+	}
+
+	// 设置默认值（作为最后的保险）
 	if reminder.RemindBefore == "" {
-		reminder.RemindBefore = "15m"
+		if p.options != nil && p.options.DefaultRemindBefore != "" {
+			reminder.RemindBefore = p.options.DefaultRemindBefore
+		} else {
+			reminder.RemindBefore = "15m"
+		}
 	}
 
 	if reminder.List == "" {

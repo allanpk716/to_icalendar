@@ -492,8 +492,12 @@ func handleClip() {
 	// Initialize Dify client
 	difyClient := dify.NewDifyClient(&serverConfig.Dify)
 
+	// Create processing options with configuration from server config
+	processingOptions := dify.DefaultProcessingOptions()
+	processingOptions.DefaultRemindBefore = serverConfig.Reminder.DefaultRemindBefore
+
 	// Initialize Dify processor
-	difyProcessor := dify.NewProcessor(difyClient, "clipboard-user", dify.DefaultProcessingOptions())
+	difyProcessor := dify.NewProcessor(difyClient, "clipboard-user", processingOptions)
 
 	// Initialize image processor
 	imageProcessor, err := processors.NewImageProcessor(difyProcessor)
@@ -689,7 +693,12 @@ func handleClipUpload() {
 
 		// Initialize Dify client and processor
 		difyClient := dify.NewDifyClient(&serverConfig.Dify)
-		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", dify.DefaultProcessingOptions())
+
+		// Create processing options with configuration from server config
+		processingOptions := dify.DefaultProcessingOptions()
+		processingOptions.DefaultRemindBefore = serverConfig.Reminder.DefaultRemindBefore
+
+		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", processingOptions)
 
 		// Initialize image processor
 		imageProcessor, err := processors.NewImageProcessor(difyProcessor)
@@ -720,7 +729,12 @@ func handleClipUpload() {
 
 		// Initialize Dify client and processor
 		difyClient := dify.NewDifyClient(&serverConfig.Dify)
-		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", dify.DefaultProcessingOptions())
+
+		// Create processing options with configuration from server config
+		processingOptions := dify.DefaultProcessingOptions()
+		processingOptions.DefaultRemindBefore = serverConfig.Reminder.DefaultRemindBefore
+
+		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", processingOptions)
 
 		// Process text using Dify
 		difyResponse, err := difyProcessor.ProcessText(ctx, text)

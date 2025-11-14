@@ -123,6 +123,7 @@ type ProcessingOptions struct {
 	ConfidenceThreshold float64   `json:"confidence_threshold"` // 置信度阈值
 	DefaultList     string        `json:"default_list"`      // 默认任务列表
 	DefaultPriority string        `json:"default_priority"`  // 默认优先级
+	DefaultRemindBefore string    `json:"default_remind_before"` // 默认提前提醒时间
 }
 
 // DefaultProcessingOptions returns default processing options
@@ -135,6 +136,7 @@ func DefaultProcessingOptions() *ProcessingOptions {
 		ConfidenceThreshold: 0.7,
 		DefaultList:        "Default",
 		DefaultPriority:    "medium",
+		DefaultRemindBefore: "15m", // 默认15分钟提醒
 	}
 }
 
