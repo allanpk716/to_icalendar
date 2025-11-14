@@ -1,0 +1,9 @@
+{
+  "title": "重复测试会议",
+  "description": "这是一个用于测试去重功能的重复会议提醒",
+  "date": "2025-11-15",
+  "time": "15:00",
+  "remind_before": "10m",
+  "priority": "high",
+  "list": "测试"
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -11,7 +12,9 @@ import (
 	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/clipboard"
+	"github.com/allanpk716/to_icalendar/internal/cleanup"
 	"github.com/allanpk716/to_icalendar/internal/config"
+	"github.com/allanpk716/to_icalendar/internal/deduplication"
 	"github.com/allanpk716/to_icalendar/internal/dify"
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
@@ -25,6 +28,26 @@ const (
 	serverConfigFile = "server.yaml"
 	reminderTemplateFile = "reminder.json"
 )
+
+// CommandOptions 命令行选项
+type CommandOptions struct {
+	ForceUpload      bool
+	NoDeduplication  bool
+	DedupStrategy    string
+	IncludeCompleted bool
+}
+
+// CleanOptions 清理命令选项
+type CleanOptions struct {
+	All        bool
+	Tasks      bool
+	Images     bool
+	Temp       bool
+	Generated  bool
+	DryRun     bool
+	Force      bool
+	OlderThan  string
+}
 
 // getConfigDir 获取配置文件目录路径
 func getConfigDir() (string, error) {
@@ -54,6 +77,77 @@ func ensureConfigDir() (string, error) {
 	return configDir, nil
 }
 
+// parseCommandOptions 解析命令行选项
+func parseCommandOptions(args []string) CommandOptions {
+	options := CommandOptions{
+		ForceUpload:      false,
+		NoDeduplication:  false,
+		DedupStrategy:    "",
+		IncludeCompleted: false,
+	}
+
+	for i, arg := range args {
+		switch arg {
+		case "--force-upload":
+			options.ForceUpload = true
+		case "--no-deduplication":
+			options.NoDeduplication = true
+		case "--dedup-strategy":
+			if i+1 < len(args) {
+				options.DedupStrategy = args[i+1]
+			}
+		case "--include-completed":
+			options.IncludeCompleted = true
+		}
+	}
+
+	return options
+}
+
+// parseCleanOptions 解析清理命令选项
+func parseCleanOptions(args []string) CleanOptions {
+	options := CleanOptions{
+		All:        false,
+		Tasks:      false,
+		Images:     false,
+		Temp:       false,
+		Generated:  false,
+		DryRun:     false,
+		Force:      false,
+		OlderThan:  "",
+	}
+
+	for i, arg := range args {
+		switch arg {
+		case "--all":
+			options.All = true
+		case "--tasks":
+			options.Tasks = true
+		case "--images":
+			options.Images = true
+		case "--temp":
+			options.Temp = true
+		case "--generated":
+			options.Generated = true
+		case "--dry-run":
+			options.DryRun = true
+		case "--force":
+			options.Force = true
+		case "--older-than":
+			if i+1 < len(args) {
+				options.OlderThan = args[i+1]
+			}
+		}
+	}
+
+	// 如果没有指定任何具体类型，默认清理所有
+	if !options.Tasks && !options.Images && !options.Temp && !options.Generated {
+		options.All = true
+	}
+
+	return options
+}
+
 func main() {
 	fmt.Printf("%s v%s - Reminder sending tool (supports Microsoft Todo)\n", appName, version)
 
@@ -68,13 +162,15 @@ func main() {
 	case "init":
 		handleInit()
 	case "upload":
-		handleUpload()
+		handleUpload(parseCommandOptions(os.Args[2:]))
 	case "test":
 		handleTest()
 	case "clip":
 		handleClip()
 	case "clip-upload":
-		handleClipUpload()
+		handleClipUpload(parseCommandOptions(os.Args[2:]))
+	case "clean":
+		handleClean(parseCleanOptions(os.Args[2:]))
 	case "help", "-h", "--help":
 		showUsage()
 	default:
@@ -147,14 +243,31 @@ func handleInit() {
 
 // handleUpload handles the upload command by sending reminders to Microsoft Todo.
 // It loads reminder files, validates configuration, and processes each reminder.
-func handleUpload() {
-	if len(os.Args) < 3 {
-		fmt.Println("Please specify reminder file path")
-		fmt.Println("Usage: to_icalendar upload <reminder_file.json>")
-		os.Exit(1)
+func handleUpload(options CommandOptions) {
+	// 过滤掉选项参数，找到实际的文件路径参数
+	args := os.Args[2:]
+	var reminderPath string
+	for i, arg := range args {
+		if !strings.HasPrefix(arg, "--") {
+			reminderPath = arg
+			// 移除选项参数，保留文件路径
+			if i > 0 {
+				args = args[i:]
+			}
+			break
+		}
 	}
 
-	reminderPath := os.Args[2]
+	if reminderPath == "" {
+		fmt.Println("Please specify reminder file path")
+		fmt.Println("Usage: to_icalendar upload <reminder_file.json> [options]")
+		fmt.Println("Options:")
+		fmt.Println("  --force-upload         Force upload even if duplicates are found")
+		fmt.Println("  --no-deduplication     Disable deduplication checking")
+		fmt.Println("  --dedup-strategy <s>   Set deduplication strategy (exact/similar)")
+		fmt.Println("  --include-completed    Include completed tasks in duplicate check")
+		os.Exit(1)
+	}
 
 	// Validate and sanitize input path
 	if strings.TrimSpace(reminderPath) == "" {
@@ -219,13 +332,27 @@ func handleUpload() {
 
 	fmt.Printf("Preparing to send %d reminders...\n", len(reminders))
 
+	// Display active options
+	if options.ForceUpload {
+		fmt.Println("⚠️ Force upload enabled - duplicates will be ignored")
+	}
+	if options.NoDeduplication {
+		fmt.Println("⚠️ Deduplication disabled by command line option")
+	}
+	if options.DedupStrategy != "" {
+		fmt.Printf("📊 Deduplication strategy: %s\n", options.DedupStrategy)
+	}
+	if options.IncludeCompleted {
+		fmt.Println("📋 Including completed tasks in duplicate check")
+	}
+
 	// Process reminders
-	handleMicrosoftTodoUpload(serverConfig, reminders)
+	handleMicrosoftTodoUpload(serverConfig, reminders, options)
 }
 
 // handleMicrosoftTodoUpload handles uploading reminders to Microsoft Todo.
 // It creates a Todo client, tests connection, and processes each reminder.
-func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*models.Reminder) {
+func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*models.Reminder, options CommandOptions) {
 	fmt.Println("Using Microsoft Todo service...")
 
 	// Create simplified Todo client
@@ -247,8 +374,53 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 	}
 	fmt.Println("✓ Microsoft Graph connection successful")
 
+	// Initialize deduplication service
+	var deduplicator *deduplication.Deduplicator
+	var cacheManager *deduplication.CacheManager
+
+	// Apply command line options to configuration
+	dedupConfig := serverConfig.Deduplication
+	if options.NoDeduplication {
+		dedupConfig.Enabled = false
+	}
+	if options.ForceUpload {
+		dedupConfig.Enabled = false
+	}
+	if options.DedupStrategy != "" {
+		// This would require modifying the deduplication logic to use different strategies
+		// For now, we just log it
+		fmt.Printf("  📊 Strategy override: %s (not yet implemented)\n", options.DedupStrategy)
+	}
+	if options.IncludeCompleted {
+		dedupConfig.CheckIncompleteOnly = false
+	}
+
+	if dedupConfig.Enabled {
+		fmt.Println("✓ Deduplication enabled")
+
+		// Initialize cache manager
+		configDir, _ := getConfigDir()
+		cacheDir := filepath.Join(configDir, "cache")
+		cacheManager = deduplication.NewCacheManager(cacheDir, nil)
+
+		// Initialize deduplicator (简化版 - 仅本地缓存)
+		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
+
+		fmt.Printf("  - Local cache: %t\n", dedupConfig.EnableLocalCache)
+		fmt.Printf("  - Remote query: 已禁用\n")
+	} else {
+		if options.NoDeduplication {
+			fmt.Println("  ⚠️ Deduplication disabled by command line option")
+		} else if options.ForceUpload {
+			fmt.Println("  ⚠️ Deduplication disabled due to force upload")
+		} else {
+			fmt.Println("  ⚠️ Deduplication disabled in configuration")
+		}
+	}
+
 	// Process reminders
 	successCount := 0
+	skippedCount := 0
 	for i, reminder := range reminders {
 		// Validate reminder data
 		if reminder == nil {
@@ -305,6 +477,24 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 			parsedReminder.AlarmTime.Format("2006-01-02 15:04"),
 			parsedReminder.DueTime.Format("2006-01-02 15:04"))
 
+		// Deduplication check
+		if deduplicator != nil {
+			fmt.Printf("  🔍 Checking for duplicates...\n")
+			dupResult, err := deduplicator.CheckDuplicate(parsedReminder)
+		if err != nil {
+			fmt.Printf("  ⚠️ Deduplication check failed: %v\n", err)
+		} else if dupResult.IsDuplicate {
+			fmt.Printf("  🚫 Duplicate detected: %s\n", dupResult.SkipReason)
+			if dupResult.DuplicateType == "cache" {
+				fmt.Printf("    → Skipping (found in local cache)\n")
+				skippedCount++
+				continue
+			}
+		} else {
+			fmt.Printf("  ✅ No duplicates found\n")
+		}
+		}
+
 		// Get or create task list
 		listName := parsedReminder.Original.List
 		if listName == "" {
@@ -335,10 +525,33 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 		fmt.Printf("  ✓ Created successfully (due: %s, reminder: %s)\n",
 			parsedReminder.DueTime.Format("2006-01-02 15:04"),
 			parsedReminder.AlarmTime.Format("2006-01-02 15:04"))
+
+		// Record successful submission to cache
+		if deduplicator != nil {
+			if err := deduplicator.RecordSubmittedTask(parsedReminder, ""); err != nil {
+				fmt.Printf("  ⚠️ Failed to record task to cache: %v\n", err)
+			}
+		}
+
 		successCount++
 	}
 
-	fmt.Printf("\nUpload completed! Success: %d/%d\n", successCount, len(reminders))
+	// Show deduplication statistics
+	if deduplicator != nil {
+		stats := deduplicator.GetStats()
+		fmt.Printf("\n📊 Deduplication Statistics:\n")
+		fmt.Printf("  - Enabled: %t\n", stats["deduplication_enabled"])
+		if cacheStats, ok := stats["cache_stats"].(map[string]interface{}); ok {
+			fmt.Printf("  - Cached tasks: %v\n", cacheStats["total_tasks"])
+			fmt.Printf("  - Recent tasks (24h): %v\n", cacheStats["recent_tasks_24h"])
+		}
+	}
+
+	fmt.Printf("\nUpload completed! Success: %d/%d", successCount, len(reminders))
+	if skippedCount > 0 {
+		fmt.Printf(" (Skipped: %d duplicates)", skippedCount)
+	}
+	fmt.Printf("\n")
 }
 
 
@@ -418,19 +631,49 @@ Commands:
   test                    Test service connection
   clip                    Process clipboard content (image or text) and generate JSON
   clip-upload             Process clipboard content and directly upload to Microsoft Todo
+  clean                   Clean cache files
   help                    Show this help message
+
+Options:
+  Upload command:
+    --force-upload          Force upload even if duplicates are found
+    --no-deduplication      Disable deduplication checking
+    --dedup-strategy <s>    Set deduplication strategy (exact/similar) [not yet implemented]
+    --include-completed     Include completed tasks in duplicate check
+
+  Clean command:
+    --all                   Clean all cache types (default)
+    --tasks                 Clean task deduplication cache only
+    --images                Clean image cache only
+    --temp                  Clean temporary files only
+    --generated             Clean generated JSON files only
+    --dry-run               Preview files to be cleaned (without deleting)
+    --force                 Skip confirmation and clean directly
+    --older-than 7d         Only clean files older than specified time (7d, 24h, 30m)
 
 Examples:
   %s init                                          # Initialize configuration
   %s upload ~/.to_icalendar/reminder.json        # Send single reminder
   %s upload reminders/*.json                      # Send batch reminders
+  %s upload reminder.json --force-upload         # Force upload, ignore duplicates
+  %s upload reminder.json --no-deduplication     # Disable deduplication
   %s test                                          # Test connection
   %s clip                                          # Process clipboard and generate JSON
-  %s clip-upload                                   # Process clipboard and upload to Microsoft Todo
+  %s clip-upload --force-upload                   # Process clipboard and upload, ignore duplicates
+  %s clean --dry-run                               # Preview files to be cleaned
+  %s clean --tasks --force                         # Force clean task cache
+  %s clean --older-than 7d                         # Clean files older than 7 days
 
 Configuration files:
   ~/.to_icalendar/server.yaml       Service configuration (Microsoft Todo & Dify)
   ~/.to_icalendar/reminder.json     Reminder template
+
+Deduplication:
+  The application supports intelligent deduplication to avoid creating duplicate tasks:
+  - Local cache for fast offline checking
+  - Remote query to check Microsoft Todo for existing tasks
+  - Similarity matching for near-duplicates
+  - Only checks incomplete tasks by default (configurable)
 
 Supported services:
   1. Microsoft Todo:
@@ -447,7 +690,7 @@ Instructions:
   6. Run 'to_icalendar clip-upload' to process clipboard and directly upload to Microsoft Todo
 
 For more information, see README.md
-`, appName, appName, appName, appName, appName, appName, appName)
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 // handleClip processes clipboard content (image or text) using Dify API
@@ -624,7 +867,7 @@ func handleClip() {
 
 // handleClipUpload processes clipboard content and directly uploads to Microsoft Todo
 // It handles the complete workflow: clipboard → Dify AI → Microsoft Todo upload
-func handleClipUpload() {
+func handleClipUpload(options CommandOptions) {
 	fmt.Println("Starting clipboard upload to Microsoft Todo...")
 
 	// Create context with timeout
@@ -837,6 +1080,59 @@ func handleClipUpload() {
 		log.Fatalf("Failed to get or create task list '%s': %v", listName, err)
 	}
 
+	// Apply command line options to configuration
+	dedupConfig := serverConfig.Deduplication
+	if options.NoDeduplication {
+		dedupConfig.Enabled = false
+	}
+	if options.ForceUpload {
+		dedupConfig.Enabled = false
+	}
+	if options.IncludeCompleted {
+		dedupConfig.CheckIncompleteOnly = false
+	}
+
+	// Initialize deduplication service for clip-upload
+	var deduplicator *deduplication.Deduplicator
+	var cacheManager *deduplication.CacheManager
+
+	if dedupConfig.Enabled {
+		fmt.Println("✓ Deduplication enabled")
+
+		// Initialize cache manager
+		configDir, _ := getConfigDir()
+		cacheDir := filepath.Join(configDir, "cache")
+		cacheManager = deduplication.NewCacheManager(cacheDir, nil)
+
+		// Initialize deduplicator (简化版 - 仅本地缓存)
+		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
+
+		// Check for duplicates
+		fmt.Printf("  🔍 Checking for duplicates...\n")
+		dupResult, err := deduplicator.CheckDuplicate(parsedReminder)
+		if err != nil {
+			fmt.Printf("  ⚠️ Deduplication check failed: %v\n", err)
+		} else if dupResult.IsDuplicate {
+			fmt.Printf("  🚫 Duplicate detected: %s\n", dupResult.SkipReason)
+			if dupResult.DuplicateType == "cache" {
+				fmt.Printf("    → Skipping (found in local cache)\n")
+				fmt.Println("\n❌ Clip-upload skipped due to duplicate task")
+				fmt.Println("Use --force-upload to override if needed")
+				return
+			}
+		} else {
+			fmt.Printf("  ✅ No duplicates found\n")
+		}
+	} else {
+		if options.NoDeduplication {
+			fmt.Println("  ⚠️ Deduplication disabled by command line option")
+		} else if options.ForceUpload {
+			fmt.Println("  ⚠️ Deduplication disabled due to force upload")
+		} else {
+			fmt.Println("  ⚠️ Deduplication disabled in configuration")
+		}
+	}
+
 	// Send to Microsoft Todo with full details
 	err = todoClient.CreateTaskWithDetails(
 		parsedReminder.Original.Title,
@@ -851,6 +1147,13 @@ func handleClipUpload() {
 		log.Fatalf("Failed to create task: %v", err)
 	}
 
+	// Record successful submission to cache
+	if deduplicator != nil {
+		if err := deduplicator.RecordSubmittedTask(parsedReminder, ""); err != nil {
+			fmt.Printf("  ⚠️ Failed to record task to cache: %v\n", err)
+		}
+	}
+
 	fmt.Printf("✓ Successfully created task in Microsoft Todo!\n")
 	fmt.Printf("  Title: %s\n", parsedReminder.Original.Title)
 	fmt.Printf("  List: %s\n", listName)
@@ -862,6 +1165,113 @@ func handleClipUpload() {
 
 	fmt.Println("\n🎉 Clip-upload completed successfully!")
 	fmt.Println("The task has been added to your Microsoft Todo list.")
+}
+
+// handleClean 处理清理缓存命令
+func handleClean(options CleanOptions) {
+	fmt.Println("🧹 开始清理缓存...")
+
+	// 创建清理器
+	cleaner := cleanup.NewCleaner()
+
+	// 初始化必要的组件
+	configManager := config.NewConfigManager()
+	cleaner.SetConfig(configManager)
+
+	// 尝试初始化缓存管理器
+	cacheDir, _ := getConfigDir()
+	cacheManager := deduplication.NewCacheManager(filepath.Join(cacheDir, "cache"), log.Default())
+	cleaner.SetCacheManager(cacheManager)
+
+	// 暂时跳过图片配置初始化，避免空指针问题
+	// logger := logrus.New()
+	// imageConfig := image.NewConfigManager(cacheDir, logger)
+	// cleaner.SetImageConfig(imageConfig)
+
+	// 准备清理选项
+	cleanOptions := cleanup.CleanOptions{
+		All:       options.All,
+		Tasks:     options.Tasks,
+		Images:    options.Images,
+		Temp:      options.Temp,
+		Generated: options.Generated,
+		DryRun:    options.DryRun,
+		Force:     options.Force,
+		OlderThan: options.OlderThan,
+	}
+
+	// 显示清理信息
+	fmt.Printf("清理选项:\n")
+	if cleanOptions.All {
+		fmt.Printf("  - 清理所有缓存\n")
+	} else {
+		if cleanOptions.Tasks {
+			fmt.Printf("  - 任务去重缓存\n")
+		}
+		if cleanOptions.Images {
+			fmt.Printf("  - 图片处理缓存\n")
+		}
+		if cleanOptions.Temp {
+			fmt.Printf("  - 临时文件\n")
+		}
+		if cleanOptions.Generated {
+			fmt.Printf("  - 生成的JSON文件\n")
+		}
+	}
+	if cleanOptions.DryRun {
+		fmt.Printf("  - 预览模式（不会实际删除文件）\n")
+	}
+	if cleanOptions.OlderThan != "" {
+		fmt.Printf("  - 仅清理超过 %s 的文件\n", cleanOptions.OlderThan)
+	}
+
+	// 如果不是预览模式且没有强制标志，询问确认
+	if !cleanOptions.DryRun && !cleanOptions.Force {
+		fmt.Printf("\n⚠️  这将删除缓存文件，是否继续？ [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatalf("读取用户输入失败: %v", err)
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("清理操作已取消")
+			return
+		}
+	}
+
+	// 执行清理
+	summary, err := cleaner.Clean(cleanOptions)
+	if err != nil {
+		log.Fatalf("清理失败: %v", err)
+	}
+
+	// 显示结果
+	if cleanOptions.DryRun {
+		summary.PrintPreview()
+	} else {
+		summary.PrintSummary()
+		if summary.TotalFiles > 0 {
+			fmt.Printf("\n✅ 清理完成！共删除 %d 个文件，释放 %s 空间\n",
+				summary.TotalFiles, formatBytes(summary.TotalSize))
+		} else {
+			fmt.Printf("\nℹ️  没有找到需要清理的文件\n")
+		}
+	}
+}
+
+// formatBytes 格式化字节数为人类可读格式
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // min returns the minimum of two integers

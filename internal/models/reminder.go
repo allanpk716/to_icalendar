@@ -43,6 +43,16 @@ type ReminderConfig struct {
 	EnableSmartReminder bool   `yaml:"enable_smart_reminder"` // 是否启用智能提醒（根据优先级自动调整）
 }
 
+// DeduplicationConfig represents the configuration for task deduplication settings.
+type DeduplicationConfig struct {
+	Enabled              bool `yaml:"enabled"`                // 是否启用去重功能
+	TimeWindowMinutes    int  `yaml:"time_window_minutes"`    // 时间匹配窗口（分钟）
+	SimilarityThreshold  int  `yaml:"similarity_threshold"`   // 相似度阈值（百分比 0-100）
+	CheckIncompleteOnly  bool `yaml:"check_incomplete_only"`  // 只检查未完成的任务
+	EnableLocalCache     bool `yaml:"enable_local_cache"`     // 启用本地缓存
+	EnableRemoteQuery    bool `yaml:"enable_remote_query"`    // 启用远程查询
+}
+
 // Validate validates the reminder configuration
 func (c *ReminderConfig) Validate() error {
 	// 如果没有设置默认提醒时间，使用默认值
@@ -54,6 +64,27 @@ func (c *ReminderConfig) Validate() error {
 	_, err := parseDuration(time.Now(), c.DefaultRemindBefore)
 	if err != nil {
 		return fmt.Errorf("invalid default_remind_before format: %w", err)
+	}
+
+	return nil
+}
+
+// Validate validates the deduplication configuration
+func (c *DeduplicationConfig) Validate() error {
+	// 设置默认值
+	if c.TimeWindowMinutes == 0 {
+		c.TimeWindowMinutes = 5 // 默认5分钟时间窗口
+	}
+	if c.SimilarityThreshold == 0 {
+		c.SimilarityThreshold = 80 // 默认80%相似度阈值
+	}
+
+	// 验证范围
+	if c.TimeWindowMinutes < 0 || c.TimeWindowMinutes > 1440 {
+		return fmt.Errorf("time_window_minutes must be between 0 and 1440 (24 hours)")
+	}
+	if c.SimilarityThreshold < 0 || c.SimilarityThreshold > 100 {
+		return fmt.Errorf("similarity_threshold must be between 0 and 100")
 	}
 
 	return nil
@@ -87,9 +118,10 @@ func (c *ReminderConfig) GetSmartRemindTime(priority Priority) string {
 // ServerConfig contains configuration for Microsoft Todo, Dify integration, and reminder settings.
 // It includes Azure AD credentials, timezone settings, Dify API configuration, and reminder defaults.
 type ServerConfig struct {
-	MicrosoftTodo MicrosoftTodoConfig `yaml:"microsoft_todo"`
-	Reminder      ReminderConfig      `yaml:"reminder"`
-	Dify          DifyConfig         `yaml:"dify"`
+	MicrosoftTodo  MicrosoftTodoConfig   `yaml:"microsoft_todo"`
+	Reminder       ReminderConfig        `yaml:"reminder"`
+	Deduplication  DeduplicationConfig   `yaml:"deduplication"`
+	Dify           DifyConfig           `yaml:"dify"`
 }
 
 // ParsedReminder represents a reminder with parsed time information.

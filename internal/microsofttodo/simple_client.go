@@ -3,9 +3,11 @@ package microsofttodo
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,11 +37,97 @@ type TokenData struct {
 	TokenType    string    `json:"token_type"`
 }
 
+// QueryCacheEntry 查询结果缓存条目
+type QueryCacheEntry struct {
+	Tasks    []TaskInfo `json:"tasks"`
+	CacheTime time.Time `json:"cache_time"`
+	TTL      time.Duration `json:"ttl"`
+}
+
+// QueryCache 查询结果缓存
+type QueryCache struct {
+	cache  map[string]*QueryCacheEntry
+	mutex  sync.RWMutex
+	ttl    time.Duration
+}
+
+// NewQueryCache 创建新的查询缓存
+func NewQueryCache(ttl time.Duration) *QueryCache {
+	return &QueryCache{
+		cache: make(map[string]*QueryCacheEntry),
+		ttl:   ttl,
+	}
+}
+
+// Get 获取缓存结果
+func (qc *QueryCache) Get(key string) ([]TaskInfo, bool) {
+	qc.mutex.RLock()
+	defer qc.mutex.RUnlock()
+
+	entry, exists := qc.cache[key]
+	if !exists {
+		return nil, false
+	}
+
+	// 检查是否过期
+	if time.Since(entry.CacheTime) > entry.TTL {
+		// 过期，删除缓存
+		delete(qc.cache, key)
+		return nil, false
+	}
+
+	return entry.Tasks, true
+}
+
+// Set 设置缓存结果
+func (qc *QueryCache) Set(key string, tasks []TaskInfo) {
+	qc.mutex.Lock()
+	defer qc.mutex.Unlock()
+
+	qc.cache[key] = &QueryCacheEntry{
+		Tasks:     tasks,
+		CacheTime: time.Now(),
+		TTL:       qc.ttl,
+	}
+}
+
+// Clear 清空缓存
+func (qc *QueryCache) Clear() {
+	qc.mutex.Lock()
+	defer qc.mutex.Unlock()
+
+	qc.cache = make(map[string]*QueryCacheEntry)
+}
+
+// GetStats 获取缓存统计信息
+func (qc *QueryCache) GetStats() map[string]interface{} {
+	qc.mutex.RLock()
+	defer qc.mutex.RUnlock()
+
+	totalEntries := len(qc.cache)
+	expiredEntries := 0
+	now := time.Now()
+
+	for _, entry := range qc.cache {
+		if now.Sub(entry.CacheTime) > entry.TTL {
+			expiredEntries++
+		}
+	}
+
+	return map[string]interface{}{
+		"total_entries":   totalEntries,
+		"expired_entries": expiredEntries,
+		"valid_entries":   totalEntries - expiredEntries,
+		"ttl_minutes":     qc.ttl.Minutes(),
+	}
+}
+
 // SimpleTodoClient 简化的 Microsoft Todo 客户端
 type SimpleTodoClient struct {
-	authConfig *AuthConfig
-	httpClient *http.Client
-	baseURL    string
+	authConfig  *AuthConfig
+	httpClient  *http.Client
+	baseURL     string
+	queryCache  *QueryCache
 }
 
 // NewSimpleTodoClient 创建新的简化 Todo 客户端
@@ -57,6 +146,7 @@ func NewSimpleTodoClient(tenantID, clientID, clientSecret, userEmail string) (*S
 		},
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		baseURL:    "https://graph.microsoft.com/v1.0",
+		queryCache: NewQueryCache(5 * time.Minute), // 查询缓存5分钟过期
 	}, nil
 }
 
@@ -451,6 +541,44 @@ func (c *SimpleTodoClient) makeAPIRequest(ctx context.Context, method, endpoint 
 	return resp, nil
 }
 
+// makeAPIRequestWithRetry 发起带重试机制的API请求
+func (c *SimpleTodoClient) makeAPIRequestWithRetry(ctx context.Context, method, endpoint string, requestBody interface{}, maxRetries int) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			log.Printf("Retrying API request (attempt %d/%d): %s %s", attempt+1, maxRetries, method, endpoint)
+			// 指数退避策略
+			backoffDuration := time.Duration(attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoffDuration):
+			}
+		}
+
+		resp, err := c.makeAPIRequest(ctx, method, endpoint, requestBody)
+		if err != nil {
+			lastErr = err
+			log.Printf("API request failed (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			continue
+		}
+
+		// 检查是否是服务器错误，如果是则重试
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("server error with status: %d", resp.StatusCode)
+			log.Printf("Server error (attempt %d/%d): %d", attempt+1, maxRetries, resp.StatusCode)
+			continue
+		}
+
+		// 成功或客户端错误（4xx），直接返回
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("API request failed after %d attempts: %v", maxRetries, lastErr)
+}
+
 // TestConnection 测试连接到 Microsoft Graph API
 func (c *SimpleTodoClient) TestConnection() error {
 	log.Printf("Testing Microsoft Graph connection with Tenant ID: %s, Client ID: %s", c.authConfig.TenantID, c.authConfig.ClientID)
@@ -587,16 +715,22 @@ func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID stri
 
 	// 设置截止时间
 	if !dueTime.IsZero() {
+		// 使用本地时间，确保时间格式包含时区信息
+		// Microsoft Graph API 会根据提供的 timeZone 字段正确处理时区
+		localTime := dueTime.Local()
 		newTask["dueDateTime"] = map[string]interface{}{
-			"dateTime": dueTime.Format("2006-01-02T15:04:05"),
+			"dateTime": localTime.Format("2006-01-02T15:04:05"),
 			"timeZone": timezone,
 		}
+		log.Printf("Setting due time: %s (timezone: %s)", localTime.Format("2006-01-02 15:04:05"), timezone)
 	}
 
 	// 设置提醒时间
 	if !reminderTime.IsZero() {
+		// 直接使用本地时间，不进行时区转换
+		// Microsoft Graph API 会根据提供的 timeZone 字段正确处理时区
 		newTask["reminderDateTime"] = map[string]interface{}{
-			"dateTime": reminderTime.Format("2006-01-02T15:04:05"),
+			"dateTime": reminderTime.Local().Format("2006-01-02T15:04:05"),
 			"timeZone": timezone,
 		}
 	}
@@ -793,4 +927,332 @@ func (c *SimpleTodoClient) clearCachedToken() error {
 	}
 	log.Printf("Cached token cleared")
 	return nil
+}
+
+// TaskInfo 表示从 Microsoft Todo 查询到的任务信息
+type TaskInfo struct {
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Description   string    `json:"body"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"createdDateTime"`
+	DueDateTime   string    `json:"dueDateTime"`
+	Importance    string    `json:"importance"`
+	IsCompleted   bool      `json:"completed"`
+}
+
+// generateQueryCacheKey 生成查询缓存键
+func (c *SimpleTodoClient) generateQueryCacheKey(listName, queryType, params string) string {
+	data := fmt.Sprintf("%s|%s|%s", listName, queryType, params)
+	hash := md5.Sum([]byte(data))
+	return hex.EncodeToString(hash[:])
+}
+
+// QueryIncompleteTasks 查询未完成的任务
+func (c *SimpleTodoClient) QueryIncompleteTasks(listName string) ([]TaskInfo, error) {
+	log.Printf("Querying incomplete tasks in list: %s", listName)
+
+	// 生成缓存键
+	cacheKey := c.generateQueryCacheKey(listName, "incomplete", "")
+
+	// 尝试从缓存获取结果
+	if tasks, found := c.queryCache.Get(cacheKey); found {
+		log.Printf("Cache hit for incomplete tasks query: %s (%d tasks)", listName, len(tasks))
+		return tasks, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 首先获取任务列表ID
+	listID, err := c.GetOrCreateTaskList(listName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task list: %v", err)
+	}
+
+	// 构建查询参数，获取所有任务，然后在客户端过滤
+	// 简化查询，避免复杂的 OData 过滤语法
+	endpoint := fmt.Sprintf("/me/todo/lists/%s/tasks", listID)
+	log.Printf("Query endpoint: %s", endpoint) // 调试信息
+
+	resp, err := c.makeAPIRequestWithRetry(ctx, "GET", endpoint, nil, 2)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tasks: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		var errorResp map[string]interface{}
+		if err := json.Unmarshal(body, &errorResp); err != nil {
+			log.Printf("Failed to unmarshal error response: %v, raw body: %s", err, string(body))
+		}
+
+		// 记录详细的错误信息用于调试
+		log.Printf("Query failed with status: %d, endpoint: %s", resp.StatusCode, endpoint)
+		log.Printf("Error response body: %s", string(body))
+
+		// 检查特定的错误类型
+		if errorResp != nil {
+			if error, ok := errorResp["error"].(map[string]interface{}); ok {
+				if code, ok := error["code"].(string); ok {
+					switch code {
+					case "Request_ResourceNotFound":
+						return nil, fmt.Errorf("task list not found: %s", listName)
+					case "AuthenticationError":
+						return nil, fmt.Errorf("authentication failed, please re-authenticate")
+					case "InvalidFilterClause":
+						return nil, fmt.Errorf("invalid OData filter clause in query: %s", endpoint)
+					}
+				}
+			}
+		}
+
+		return nil, fmt.Errorf("failed to query tasks with status: %d, error: %+v", resp.StatusCode, errorResp)
+	}
+
+	// 解析响应
+	var response struct {
+		Value []struct {
+			ID            string                 `json:"id"`
+			Title         string                 `json:"title"`
+			Body          map[string]interface{} `json:"body,omitempty"`
+			Status        string                 `json:"status"`
+			CreatedDateTime string               `json:"createdDateTime"`
+			DueDateTime   map[string]interface{} `json:"dueDateTime,omitempty"`
+			Importance    string                 `json:"importance"`
+		} `json:"value"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode tasks response: %v", err)
+	}
+
+	// 转换为TaskInfo结构
+	var tasks []TaskInfo
+	for _, task := range response.Value {
+		taskInfo := TaskInfo{
+			ID:          task.ID,
+			Title:       task.Title,
+			Status:      task.Status,
+			CreatedAt:   parseTime(task.CreatedDateTime),
+			Importance:  task.Importance,
+			IsCompleted: task.Status == "completed",
+		}
+
+		// 提取描述信息
+		if task.Body != nil {
+			if content, ok := task.Body["content"].(string); ok {
+				taskInfo.Description = content
+			}
+		}
+
+		// 提取截止时间
+		if task.DueDateTime != nil {
+			if dateTime, ok := task.DueDateTime["dateTime"].(string); ok {
+				taskInfo.DueDateTime = dateTime
+			}
+		}
+
+			// 只包含未完成的任务
+		if !taskInfo.IsCompleted {
+			tasks = append(tasks, taskInfo)
+		}
+	}
+
+	log.Printf("Found %d incomplete tasks in list '%s' (filtered from %d total)", len(tasks), listName, len(response.Value))
+
+	// 将结果添加到缓存
+	c.queryCache.Set(cacheKey, tasks)
+	log.Printf("Cached incomplete tasks query result: %s (%d tasks)", listName, len(tasks))
+
+	return tasks, nil
+}
+
+// QueryTasksByTitle 根据标题模糊查询任务
+func (c *SimpleTodoClient) QueryTasksByTitle(listName, titleKeyword string, incompleteOnly bool) ([]TaskInfo, error) {
+	log.Printf("Querying tasks by keyword '%s' in list: %s (incomplete only: %t)", titleKeyword, listName, incompleteOnly)
+
+	// 生成缓存键
+	incompleteStr := "false"
+	if incompleteOnly {
+		incompleteStr = "true"
+	}
+	cacheKey := c.generateQueryCacheKey(listName, "by_title", fmt.Sprintf("%s|%s", titleKeyword, incompleteStr))
+
+	// 尝试从缓存获取结果
+	if tasks, found := c.queryCache.Get(cacheKey); found {
+		log.Printf("Cache hit for tasks by title query: %s - %s (%d tasks)", listName, titleKeyword, len(tasks))
+		return tasks, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 获取任务列表ID
+	listID, err := c.GetOrCreateTaskList(listName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task list: %v", err)
+	}
+
+	// 构建查询参数 - 使用最简单的查询方式
+	endpoint := fmt.Sprintf("/me/todo/lists/%s/tasks", listID)
+	log.Printf("Query endpoint: %s", endpoint) // 调试信息
+
+	resp, err := c.makeAPIRequestWithRetry(ctx, "GET", endpoint, nil, 2)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query tasks by title: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		var errorResp map[string]interface{}
+		if err := json.Unmarshal(body, &errorResp); err != nil {
+			log.Printf("Failed to unmarshal error response: %v, raw body: %s", err, string(body))
+		}
+
+		// 记录详细的错误信息用于调试
+		log.Printf("Query failed with status: %d, endpoint: %s", resp.StatusCode, endpoint)
+		log.Printf("Error response body: %s", string(body))
+
+		// 检查特定的错误类型
+		if errorResp != nil {
+			if error, ok := errorResp["error"].(map[string]interface{}); ok {
+				if code, ok := error["code"].(string); ok {
+					switch code {
+					case "Request_ResourceNotFound":
+						return nil, fmt.Errorf("task list not found: %s", listName)
+					case "AuthenticationError":
+						return nil, fmt.Errorf("authentication failed, please re-authenticate")
+					case "InvalidFilterClause":
+						return nil, fmt.Errorf("invalid OData filter clause in query")
+					}
+				}
+			}
+		}
+
+		return nil, fmt.Errorf("failed to query tasks by title with status: %d, error: %+v", resp.StatusCode, errorResp)
+	}
+
+	// 解析响应
+	var response struct {
+		Value []struct {
+			ID            string                 `json:"id"`
+			Title         string                 `json:"title"`
+			Body          map[string]interface{} `json:"body,omitempty"`
+			Status        string                 `json:"status"`
+			CreatedDateTime string               `json:"createdDateTime"`
+			DueDateTime   map[string]interface{} `json:"dueDateTime,omitempty"`
+			Importance    string                 `json:"importance"`
+		} `json:"value"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode tasks response: %v", err)
+	}
+
+	// 转换为TaskInfo结构
+	var tasks []TaskInfo
+	for _, task := range response.Value {
+		taskInfo := TaskInfo{
+			ID:          task.ID,
+			Title:       task.Title,
+			Status:      task.Status,
+			CreatedAt:   parseTime(task.CreatedDateTime),
+			Importance:  task.Importance,
+			IsCompleted: task.Status == "completed",
+		}
+
+		// 提取描述信息
+		if task.Body != nil {
+			if content, ok := task.Body["content"].(string); ok {
+				taskInfo.Description = content
+			}
+		}
+
+		// 提取截止时间
+		if task.DueDateTime != nil {
+			if dateTime, ok := task.DueDateTime["dateTime"].(string); ok {
+				taskInfo.DueDateTime = dateTime
+			}
+		}
+
+		// 客户端过滤条件
+		shouldInclude := true
+
+		// 过滤已完成任务
+		if incompleteOnly && taskInfo.IsCompleted {
+			shouldInclude = false
+		}
+
+		// 按标题关键词过滤
+		if titleKeyword != "" {
+			titleLower := strings.ToLower(taskInfo.Title)
+			keywordLower := strings.ToLower(titleKeyword)
+			if !strings.Contains(titleLower, keywordLower) {
+				shouldInclude = false
+			}
+		}
+
+		if shouldInclude {
+			tasks = append(tasks, taskInfo)
+		}
+	}
+
+	log.Printf("Found %d tasks matching '%s' in list '%s' (filtered from %d total)", len(tasks), titleKeyword, listName, len(response.Value))
+
+	// 将结果添加到缓存
+	c.queryCache.Set(cacheKey, tasks)
+	log.Printf("Cached tasks by title query result: %s - %s (%d tasks)", listName, titleKeyword, len(tasks))
+
+	return tasks, nil
+}
+
+// GetQueryCacheStats 获取查询缓存统计信息
+func (c *SimpleTodoClient) GetQueryCacheStats() map[string]interface{} {
+	if c.queryCache == nil {
+		return map[string]interface{}{
+			"cache_enabled": false,
+		}
+	}
+
+	stats := c.queryCache.GetStats()
+	stats["cache_enabled"] = true
+	return stats
+}
+
+// ClearQueryCache 清空查询缓存
+func (c *SimpleTodoClient) ClearQueryCache() {
+	if c.queryCache != nil {
+		c.queryCache.Clear()
+		log.Printf("Query cache cleared")
+	}
+}
+
+// parseTime 解析时间字符串
+func parseTime(timeStr string) time.Time {
+	if timeStr == "" {
+		return time.Time{}
+	}
+
+	// Microsoft Graph API 返回的时间格式是 RFC3339 格式
+	if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+		return t
+	}
+
+	// 尝试其他可能的格式
+	formats := []string{
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05.000Z07:00",
+		"2006-01-02T15:04:05",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return t
+		}
+	}
+
+	return time.Time{}
 }

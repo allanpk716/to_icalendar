@@ -8,7 +8,8 @@
       "Bash(findstr:*)",
       "mcp__serena__list_dir",
       "mcp__serena__think_about_collected_information",
-      "mcp__spec-workflow__spec-workflow-guide"
+      "mcp__spec-workflow__spec-workflow-guide",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

@@ -58,6 +58,11 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		return nil, fmt.Errorf("reminder configuration validation failed: %w", err)
 	}
 
+	// 验证去重配置
+	if err := config.Deduplication.Validate(); err != nil {
+		return nil, fmt.Errorf("deduplication configuration validation failed: %w", err)
+	}
+
 	// 添加配置状态日志
 	log.Printf("提醒配置加载完成:")
 	log.Printf("  默认提醒时间: %s", config.Reminder.DefaultRemindBefore)
@@ -160,6 +165,14 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	// 提醒配置
 	template.Reminder.DefaultRemindBefore = "15m"
 	template.Reminder.EnableSmartReminder = true
+
+	// 去重配置
+	template.Deduplication.Enabled = true
+	template.Deduplication.TimeWindowMinutes = 5
+	template.Deduplication.SimilarityThreshold = 80
+	template.Deduplication.CheckIncompleteOnly = true
+	template.Deduplication.EnableLocalCache = true
+	template.Deduplication.EnableRemoteQuery = true
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)
