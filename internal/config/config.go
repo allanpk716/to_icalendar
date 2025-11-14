@@ -52,6 +52,11 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		config.MicrosoftTodo.Timezone = "UTC" // 默认UTC时区
 	}
 
+	// 验证提醒配置
+	if err := config.Reminder.Validate(); err != nil {
+		return nil, fmt.Errorf("reminder configuration validation failed: %w", err)
+	}
+
 	return &config, nil
 }
 
@@ -145,6 +150,10 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	template.MicrosoftTodo.ClientID = "YOUR_CLIENT_ID"
 	template.MicrosoftTodo.ClientSecret = "YOUR_CLIENT_SECRET"
 	template.MicrosoftTodo.Timezone = "Asia/Shanghai"
+
+	// 提醒配置
+	template.Reminder.DefaultRemindBefore = "15m"
+	template.Reminder.EnableSmartReminder = true
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)

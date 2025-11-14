@@ -4,3 +4,4 @@
 /cmd/test_dify/test-images
 *cache/images/*
 /cmd/to_icalendar/cache/images
+/cmd/to_icalendar/to_icalendar

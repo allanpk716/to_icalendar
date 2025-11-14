@@ -36,10 +36,52 @@ type MicrosoftTodoConfig struct {
 	Timezone     string `yaml:"timezone"`      // 时区设置
 }
 
-// ServerConfig contains configuration for Microsoft Todo and Dify integration.
-// It includes Azure AD credentials, timezone settings, and Dify API configuration.
+// ReminderConfig represents the configuration for reminder settings.
+type ReminderConfig struct {
+	DefaultRemindBefore string `yaml:"default_remind_before"` // 默认提前提醒时间（如 15m, 1h, 1d）
+	EnableSmartReminder bool   `yaml:"enable_smart_reminder"` // 是否启用智能提醒（根据优先级自动调整）
+}
+
+// Validate validates the reminder configuration
+func (c *ReminderConfig) Validate() error {
+	// 如果没有设置默认提醒时间，使用默认值
+	if c.DefaultRemindBefore == "" {
+		c.DefaultRemindBefore = "15m" // 默认提前15分钟
+	}
+
+	// 验证默认提醒时间格式
+	_, err := parseDuration(time.Now(), c.DefaultRemindBefore)
+	if err != nil {
+		return fmt.Errorf("invalid default_remind_before format: %w", err)
+	}
+
+	return nil
+}
+
+// GetSmartRemindTime 根据优先级获取智能提醒时间
+func (c *ReminderConfig) GetSmartRemindTime(priority Priority) string {
+	if !c.EnableSmartReminder {
+		return c.DefaultRemindBefore
+	}
+
+	// 根据优先级调整提醒时间
+	switch priority {
+	case PriorityHigh:
+		return "30m" // 高优先级任务提前30分钟
+	case PriorityMedium:
+		return "15m" // 中优先级任务提前15分钟
+	case PriorityLow:
+		return "5m"  // 低优先级任务提前5分钟
+	default:
+		return c.DefaultRemindBefore
+	}
+}
+
+// ServerConfig contains configuration for Microsoft Todo, Dify integration, and reminder settings.
+// It includes Azure AD credentials, timezone settings, Dify API configuration, and reminder defaults.
 type ServerConfig struct {
 	MicrosoftTodo MicrosoftTodoConfig `yaml:"microsoft_todo"`
+	Reminder      ReminderConfig      `yaml:"reminder"`
 	Dify          DifyConfig         `yaml:"dify"`
 }
 
@@ -109,9 +151,14 @@ func isValidTimeFormat(timeStr string) bool {
 }
 
 func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedReminder, error) {
+	return ParseReminderTimeWithConfig(reminder, timezone, nil)
+}
+
+// ParseReminderTimeWithConfig 使用配置信息解析提醒时间
+func ParseReminderTimeWithConfig(reminder Reminder, timezone *time.Location, config *ReminderConfig) (*ParsedReminder, error) {
 	// 处理时间范围，提取开始时间
 	processedTime := parseTimeFromRange(reminder.Time)
-	
+
 	// 解析日期和时间
 	dateTimeStr := reminder.Date + " " + processedTime
 	dueTime, err := time.ParseInLocation("2006-01-02 15:04", dateTimeStr, timezone)
@@ -122,7 +169,12 @@ func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedRemin
 	// 解析提前提醒时间
 	remindBefore := reminder.RemindBefore
 	if remindBefore == "" {
-		remindBefore = "15m" // 默认提前15分钟
+		if config != nil {
+			// 使用配置中的智能提醒时间
+			remindBefore = config.GetSmartRemindTime(reminder.Priority)
+		} else {
+			remindBefore = "15m" // 默认提前15分钟
+		}
 	}
 
 	alarmTime, err := parseDuration(dueTime, remindBefore)
