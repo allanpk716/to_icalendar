@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/sirupsen/logrus"
+	"github.com/WQGroup/logger"
 	"golang.org/x/sys/windows"
 )
 
@@ -27,14 +27,12 @@ const (
 // MSTSCEnhancedReader 增强的剪贴板读取器，专门处理 MSTSC
 type MSTSCEnhancedReader struct {
 	*WindowsClipboardReader
-	logger *logrus.Logger
 }
 
 // NewMSTSCEnhancedReader 创建 MSTSC 增强读取器
 func NewMSTSCEnhancedReader(baseReader *WindowsClipboardReader) *MSTSCEnhancedReader {
 	return &MSTSCEnhancedReader{
 		WindowsClipboardReader: baseReader,
-		logger:                 baseReader.logger,
 	}
 }
 
@@ -61,13 +59,13 @@ func (r *MSTSCEnhancedReader) ReadImageWithMSTSCSupport() ([]byte, error) {
 	for _, fmt := range standardFormats {
 		ret, _, _ := procIsClipboardFormatAvailable.Call(fmt.format)
 		if ret != 0 {
-			r.logger.Debugf("检测到标准格式: %s", fmt.name)
+			logger.Debugf("检测到标准格式: %s", fmt.name)
 			return r.readImageByFormat(fmt.format, fmt.name)
 		}
 	}
 
 	// 如果标准格式失败，尝试 MSTSC 特定格式
-	r.logger.Info("标准格式检测失败，尝试 MSTSC 特定格式...")
+	logger.Info("标准格式检测失败，尝试 MSTSC 特定格式...")
 	return r.tryMSTSCFormats()
 }
 
@@ -88,7 +86,7 @@ func (r *MSTSCEnhancedReader) tryMSTSCFormats() ([]byte, error) {
 	for _, fmt := range rdpFormats {
 		ret, _, _ := procIsClipboardFormatAvailable.Call(fmt.format)
 		if ret != 0 {
-			r.logger.Debugf("检测到 RDP 格式: %s", fmt.name)
+			logger.Debugf("检测到 RDP 格式: %s", fmt.name)
 			if data, err := r.readMSTSCFormat(fmt.format, fmt.name); err == nil {
 				return data, nil
 			}
@@ -107,7 +105,7 @@ func (r *MSTSCEnhancedReader) tryMSTSCFormats() ([]byte, error) {
 		if formatID, err := r.getRegisteredFormatID(name); err == nil {
 			ret, _, _ := procIsClipboardFormatAvailable.Call(uintptr(formatID))
 			if ret != 0 {
-				r.logger.Debugf("检测到注册的 RDP 格式: %s (%d)", name, formatID)
+				logger.Debugf("检测到注册的 RDP 格式: %s (%d)", name, formatID)
 				if data, err := r.readMSTSCFormat(uintptr(formatID), name); err == nil {
 					return data, nil
 				}
@@ -116,15 +114,15 @@ func (r *MSTSCEnhancedReader) tryMSTSCFormats() ([]byte, error) {
 	}
 
 	// 3. 尝试分析所有可用格式，寻找可能的图片数据
-	r.logger.Info("尝试分析所有可用格式...")
+	logger.Info("尝试分析所有可用格式...")
 	return r.analyzeAllFormatsForImages()
 }
 
 // getRegisteredFormatID 获取注册格式的 ID
 func (r *MSTSCEnhancedReader) getRegisteredFormatID(formatName string) (uint32, error) {
-	// 使用 RegisterClipboardFormatA 检查格式是否已注册
-	shell32 := windows.NewLazySystemDLL("shell32.dll")
-	procRegisterClipboardFormat := shell32.NewProc("RegisterClipboardFormatA")
+	// 使用 RegisterClipboardFormatA 检查格式是否已注册 (在 user32.dll 中)
+	user32 := windows.NewLazySystemDLL("user32.dll")
+	procRegisterClipboardFormat := user32.NewProc("RegisterClipboardFormatA")
 
 	formatNamePtr, err := windows.BytePtrFromString(formatName)
 	if err != nil {
@@ -160,7 +158,7 @@ func (r *MSTSCEnhancedReader) readMSTSCFormat(format uintptr, formatName string)
 		return nil, fmt.Errorf("failed to get global memory size for %s: %v", formatName, err)
 	}
 
-	r.logger.Debugf("开始读取 MSTSC 格式 %s，数据大小: %d bytes", formatName, size)
+	logger.Debugf("开始读取 MSTSC 格式 %s，数据大小: %d bytes", formatName, size)
 
 	// 读取原始数据
 	data := make([]byte, size)
@@ -182,13 +180,13 @@ func (r *MSTSCEnhancedReader) readMSTSCFormat(format uintptr, formatName string)
 
 // processRDPBitmap 处理 RDP 位图格式
 func (r *MSTSCEnhancedReader) processRDPBitmap(data []byte) ([]byte, error) {
-	r.logger.Debug("尝试处理 RDP 位图格式")
+	logger.Debug("尝试处理 RDP 位图格式")
 
 	// RDP 位图可能有特殊的头部，尝试跳过头部找到 DIB 数据
 	for offset := 0; offset < len(data)-4; offset++ {
 		// 寻找可能的 BITMAPINFOHEADER 标识 (通常是 40)
 		if data[offset] == 40 && data[offset+1] == 0 && data[offset+2] == 0 && data[offset+3] == 0 {
-			r.logger.Debugf("在偏移 %d 发现可能的 DIB 头部", offset)
+			logger.Debugf("在偏移 %d 发现可能的 DIB 头部", offset)
 			return r.processRDPDIB(data[offset:])
 		}
 	}
@@ -199,7 +197,7 @@ func (r *MSTSCEnhancedReader) processRDPBitmap(data []byte) ([]byte, error) {
 
 // processRDPDIB 处理 RDP DIB 格式
 func (r *MSTSCEnhancedReader) processRDPDIB(data []byte) ([]byte, error) {
-	r.logger.Debug("处理 RDP DIB 格式")
+	logger.Debug("处理 RDP DIB 格式")
 
 	// RDP DIB 可能有特殊的前缀，检查是否需要调整
 	if len(data) < 40 {
@@ -215,7 +213,7 @@ func (r *MSTSCEnhancedReader) processRDPDIB(data []byte) ([]byte, error) {
 	// 尝试寻找 DIB 头部
 	for offset := 0; offset < min(100, len(data)-40); offset++ {
 		if data[offset] == 40 || data[offset] == 124 {
-			r.logger.Debugf("RDP DIB: 在偏移 %d 发现可能的头部", offset)
+			logger.Debugf("RDP DIB: 在偏移 %d 发现可能的头部", offset)
 			return r.tryProcessAsDIB(data[offset:])
 		}
 	}
@@ -225,7 +223,7 @@ func (r *MSTSCEnhancedReader) processRDPDIB(data []byte) ([]byte, error) {
 
 // processRDPDisplay 处理 RDP 显示格式
 func (r *MSTSCEnhancedReader) processRDPDisplay(data []byte) ([]byte, error) {
-	r.logger.Debug("处理 RDP 显示格式")
+	logger.Debug("处理 RDP 显示格式")
 
 	// RDP 显示格式可能包含多种数据，尝试解析
 	return r.tryProcessAsDIB(data)
@@ -239,10 +237,10 @@ func (r *MSTSCEnhancedReader) tryProcessAsDIB(data []byte) ([]byte, error) {
 
 	// 检查是否是 DIBV5 (124 bytes) 或 DIB (40 bytes)
 	if len(data) >= 124 && data[0] == 124 {
-		r.logger.Debug("尝试作为 DIBV5 处理")
+		logger.Debug("尝试作为 DIBV5 处理")
 		return r.processDIBV5DataDirect(data)
 	} else if data[0] == 40 {
-		r.logger.Debug("尝试作为 DIB 处理")
+		logger.Debug("尝试作为 DIB 处理")
 		return r.processDIBDataDirect(data)
 	}
 
@@ -271,7 +269,7 @@ func (r *MSTSCEnhancedReader) processDIBDataDirect(data []byte) ([]byte, error) 
 
 // analyzeAllFormatsForImages 分析所有可用格式寻找图片数据
 func (r *MSTSCEnhancedReader) analyzeAllFormatsForImages() ([]byte, error) {
-	r.logger.Debug("枚举所有剪贴板格式以寻找图片数据...")
+	logger.Debug("枚举所有剪贴板格式以寻找图片数据...")
 
 	format := uintptr(0)
 	count := 0
@@ -282,11 +280,11 @@ func (r *MSTSCEnhancedReader) analyzeAllFormatsForImages() ([]byte, error) {
 			break
 		}
 		count++
-		r.logger.Debugf("检查格式 %d: 0x%X", count, nextFormat)
+		logger.Debugf("检查格式 %d: 0x%X", count, nextFormat)
 
 		// 尝试读取此格式的数据
 		if data, err := r.tryReadFormatAsImage(nextFormat); err == nil {
-			r.logger.Infof("成功从格式 0x%X 读取到图片数据", nextFormat)
+			logger.Infof("成功从格式 0x%X 读取到图片数据", nextFormat)
 			return data, nil
 		}
 
@@ -294,7 +292,7 @@ func (r *MSTSCEnhancedReader) analyzeAllFormatsForImages() ([]byte, error) {
 
 		// 避免检查过多格式
 		if count >= 50 {
-			r.logger.Warn("已检查 50 个格式，停止继续检查")
+			logger.Warn("已检查 50 个格式，停止继续检查")
 			break
 		}
 	}

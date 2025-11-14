@@ -6,6 +6,7 @@ import (
 	stdimage "image"
 	"image/png"
 	_ "image/jpeg" // Support JPEG decoding
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/atotto/clipboard"
 	"github.com/disintegration/imaging"
-	"github.com/sirupsen/logrus"
+	"github.com/WQGroup/logger"
 	"golang.org/x/sys/windows"
 )
 
@@ -49,7 +50,31 @@ const (
 	CF_PRIVATELAST     = 0x02FF
 	CF_GDIOBJFIRST     = 0x0300
 	CF_GDIOBJLAST      = 0x03FF
+
+	// Windows System Error Codes
+	ERROR_ACCESS_DENIED = 5
+	ERROR_INVALID_HANDLE = 6
+	ERROR_NOT_ENOUGH_MEMORY = 8
+	ERROR_INVALID_PARAMETER = 87
+	ERROR_CLIPBOARD_NOT_OPEN = 1058
+	ERROR_CLIPBOARD_LOCKED = 1420
 )
+
+// ClipboardRetryPolicy 定义剪贴板重试策略
+type ClipboardRetryPolicy struct {
+	MaxRetries    int           // 最大重试次数
+	InitialDelay  time.Duration // 初始延迟
+	MaxDelay      time.Duration // 最大延迟
+	BackoffFactor float64       // 退避因子
+}
+
+// DefaultRetryPolicy 默认重试策略
+var DefaultRetryPolicy = ClipboardRetryPolicy{
+	MaxRetries:    5,
+	InitialDelay:  50 * time.Millisecond,
+	MaxDelay:      500 * time.Millisecond,
+	BackoffFactor: 2.0,
+}
 
 var (
 	user32           = windows.NewLazySystemDLL("user32.dll")
@@ -60,6 +85,9 @@ var (
 	procGetClipboardData = user32.NewProc("GetClipboardData")
 	procEnumClipboardFormats = user32.NewProc("EnumClipboardFormats")
 	procIsClipboardFormatAvailable = user32.NewProc("IsClipboardFormatAvailable")
+	procGetOpenClipboardWindow = user32.NewProc("GetOpenClipboardWindow")
+	procGetClipboardSequenceNumber = user32.NewProc("GetClipboardSequenceNumber")
+	procGetClipboardOwner = user32.NewProc("GetClipboardOwner")
 	procGlobalLock   = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock = kernel32.NewProc("GlobalUnlock")
 	procGlobalSize   = kernel32.NewProc("GlobalSize")
@@ -116,39 +144,152 @@ type BITMAPV5HEADER struct {
 // WindowsClipboardReader implements Reader interface for Windows platform
 type WindowsClipboardReader struct {
 	normalizer    *image.ImageNormalizer
-	logger        *logrus.Logger
 	configManager *image.ConfigManager
 }
 
 // NewClipboardReader creates a new clipboard reader based on the platform
 func NewClipboardReader() (Reader, error) {
-	logger := logrus.New()
-	configManager := image.NewConfigManager(".", logger)
+	// 初始化logger
+	settings := logger.NewSettings()
+	settings.LogNameBase = "ClipboardReader"
+	settings.Level = logger.GetLogger().Level // 保持当前级别
+	logger.SetLoggerSettings(settings)
+
+	configManager := image.NewConfigManager(".", logger.GetLogger())
 	if err := configManager.LoadConfig(); err != nil {
 		logger.Warnf("加载图片处理配置失败: %v", err)
 	}
 
 	return &WindowsClipboardReader{
-		logger:        logger,
 		configManager: configManager,
 	}, nil
 }
 
 // NewClipboardReaderWithNormalizer creates a new clipboard reader with image normalizer
-func NewClipboardReaderWithNormalizer(normalizer *image.ImageNormalizer, logger *logrus.Logger) (Reader, error) {
-	if logger == nil {
-		logger = logrus.New()
-	}
-	configManager := image.NewConfigManager(".", logger)
+func NewClipboardReaderWithNormalizer(normalizer *image.ImageNormalizer) (Reader, error) {
+	// 初始化logger
+	settings := logger.NewSettings()
+	settings.LogNameBase = "ClipboardReader"
+	settings.Level = logger.GetLogger().Level // 保持当前级别
+	logger.SetLoggerSettings(settings)
+
+	configManager := image.NewConfigManager(".", logger.GetLogger())
 	if err := configManager.LoadConfig(); err != nil {
 		logger.Warnf("加载图片处理配置失败: %v", err)
 	}
 
 	return &WindowsClipboardReader{
 		normalizer:    normalizer,
-		logger:        logger,
 		configManager: configManager,
 	}, nil
+}
+
+// getClipboardOwner 获取当前占用剪贴板的窗口句柄
+func (r *WindowsClipboardReader) getClipboardOwner() uintptr {
+	owner, _, _ := procGetClipboardOwner.Call()
+	return owner
+}
+
+// getOpenClipboardWindow 获取当前已打开剪贴板的窗口句柄
+func (r *WindowsClipboardReader) getOpenClipboardWindow() uintptr {
+	window, _, _ := procGetOpenClipboardWindow.Call()
+	return window
+}
+
+// getClipboardSequenceNumber 获取剪贴板序列号，用于检测内容变化
+func (r *WindowsClipboardReader) getClipboardSequenceNumber() uint32 {
+	seq, _, _ := procGetClipboardSequenceNumber.Call()
+	return uint32(seq)
+}
+
+// isClipboardLocked 检查剪贴板是否被其他进程占用
+func (r *WindowsClipboardReader) isClipboardLocked() bool {
+	openWindow := r.getOpenClipboardWindow()
+	return openWindow != 0
+}
+
+// waitForClipboardAvailable 等待剪贴板可用，使用非阻塞方式
+func (r *WindowsClipboardReader) waitForClipboardAvailable(policy ClipboardRetryPolicy) error {
+	startTime := time.Now()
+
+	for i := 0; i < policy.MaxRetries; i++ {
+		if !r.isClipboardLocked() {
+			logger.Debugf("剪贴板在第%d次尝试后可用，耗时: %v", i+1, time.Since(startTime))
+			return nil
+		}
+
+		// 计算延迟时间：指数退避
+		delay := time.Duration(float64(policy.InitialDelay) * math.Pow(policy.BackoffFactor, float64(i)))
+		if delay > policy.MaxDelay {
+			delay = policy.MaxDelay
+		}
+
+		owner := r.getOpenClipboardWindow()
+		logger.Debugf("剪贴板被窗口 0x%X 占用，等待 %v 后重试 (%d/%d)",
+			owner, delay, i+1, policy.MaxRetries)
+
+		// 使用非阻塞的Timer等待
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+			// 继续下一次重试
+		case <-time.After(policy.MaxDelay * 2):
+			// 超时保护
+			timer.Stop()
+			break
+		}
+		timer.Stop()
+	}
+
+	// 最后一次检查
+	if r.isClipboardLocked() {
+		owner := r.getOpenClipboardWindow()
+		return fmt.Errorf("剪贴板仍被窗口 0x%X 占用，已尝试 %d 次", owner, policy.MaxRetries)
+	}
+
+	return nil
+}
+
+// openClipboardWithRetry 智能打开剪贴板，包含重试机制
+func (r *WindowsClipboardReader) openClipboardWithRetry(policy ClipboardRetryPolicy) error {
+	// 首先检查剪贴板是否被占用
+	if r.isClipboardLocked() {
+		if err := r.waitForClipboardAvailable(policy); err != nil {
+			return fmt.Errorf("等待剪贴板可用失败: %w", err)
+		}
+	}
+
+	// 尝试打开剪贴板
+	ret, _, err := procOpenClipboard.Call(0)
+	if ret != 0 {
+		return nil // 成功打开
+	}
+
+	// 分析错误原因
+	errCode := uint32(err.(windows.Errno))
+	switch errCode {
+	case ERROR_ACCESS_DENIED:
+		owner := r.getOpenClipboardWindow()
+		logger.Debugf("OpenClipboard失败: 访问被拒绝，占用窗口: 0x%X", owner)
+
+		// 如果是访问被拒绝，再次等待并重试
+		if err := r.waitForClipboardAvailable(policy); err != nil {
+			return fmt.Errorf("ERROR_ACCESS_DENIED: %w", err)
+		}
+
+		// 最后一次尝试
+		ret, _, err = procOpenClipboard.Call(0)
+		if ret == 0 {
+			return fmt.Errorf("重试后仍无法打开剪贴板: %v", err)
+		}
+		return nil
+
+	case ERROR_CLIPBOARD_LOCKED:
+		return fmt.Errorf("剪贴板被锁定，请稍后重试")
+
+	default:
+		return fmt.Errorf("OpenClipboard失败，错误码: %d, 错误: %v", errCode, err)
+	}
 }
 
 // ReadText reads text content from clipboard
@@ -165,53 +306,87 @@ func (r *WindowsClipboardReader) ReadText() (string, error) {
 	return text, nil
 }
 
-// ReadImage reads image data from clipboard using Windows API
+// ReadImage reads image data from clipboard using Windows API with intelligent retry mechanism
 func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
-	// Open clipboard
-	ret, _, err := procOpenClipboard.Call(0)
-	if ret == 0 {
-		return nil, fmt.Errorf("failed to open clipboard: %v", err)
+	// 记录剪贴板序列号用于调试
+	initialSeq := r.getClipboardSequenceNumber()
+	logger.Debugf("开始读取剪贴板图片，序列号: %d", initialSeq)
+
+	// 使用智能重试策略打开剪贴板
+	policy := DefaultRetryPolicy
+	err := r.openClipboardWithRetry(policy)
+	if err != nil {
+		return nil, fmt.Errorf("无法打开剪贴板: %w", err)
 	}
 	defer procCloseClipboard.Call()
 
-	// Check various image formats in order of preference
-	// Remote Desktop formats have higher priority
+	// 验证剪贴板内容是否发生了变化（可选调试信息）
+	finalSeq := r.getClipboardSequenceNumber()
+	if finalSeq != initialSeq {
+		logger.Debugf("剪贴板内容已变化，序列号: %d -> %d", initialSeq, finalSeq)
+	}
+
+	// 检测各种图片格式，优化检测顺序以适应Snipaste等截图工具
 	imageFormats := []struct {
 		format   uintptr
 		name     string
 		priority int
 	}{
-		{CF_DIBV5, "CF_DIBV5", 1},      // Remote Desktop format (highest priority)
-		{CF_DIB, "CF_DIB", 2},           // Standard DIB format
-		{CF_BITMAP, "CF_BITMAP", 3},     // Bitmap format
-		{CF_ENHMETAFILE, "CF_ENHMETAFILE", 4}, // Enhanced metafile
+		{CF_DIBV5, "CF_DIBV5", 1},      // Remote Desktop format (最高优先级，常用于远程桌面和高级截图工具)
+		{CF_DIB, "CF_DIB", 2},           // Standard DIB format (Snipaste常用格式)
+		{CF_BITMAP, "CF_BITMAP", 3},     // Bitmap format (兼容性格式)
+		{CF_ENHMETAFILE, "CF_ENHMETAFILE", 4}, // Enhanced metafile (矢量图格式)
 	}
 
-	// Try each format
+	// 尝试每种格式
 	for _, fmt := range imageFormats {
 		ret, _, _ := procIsClipboardFormatAvailable.Call(fmt.format)
 		if ret != 0 {
-			r.logger.Debugf("检测到图片格式: %s", fmt.name)
-			return r.readImageByFormat(fmt.format, fmt.name)
+			logger.Debugf("检测到图片格式: %s (优先级: %d)", fmt.name, fmt.priority)
+
+			// 为特定格式添加额外的等待时间（特别是DIB格式）
+			if fmt.format == CF_DIB || fmt.format == CF_DIBV5 {
+				logger.Debugf("为 %s 格式添加额外等待时间以允许数据完全就绪", fmt.name)
+				time.Sleep(10 * time.Millisecond) // 短暂等待确保数据完全写入
+			}
+
+			imageData, err := r.readImageByFormat(fmt.format, fmt.name)
+			if err != nil {
+				logger.Warnf("读取 %s 格式失败: %v，尝试下一种格式", fmt.name, err)
+				continue
+			}
+			return imageData, nil
 		}
 	}
 
-	// If standard formats fail, try CF_HDROP format (file-based images)
-	r.logger.Info("标准图片格式检测失败，尝试文件格式 (CF_HDROP)...")
+	// 如果标准格式失败，尝试 CF_HDROP 格式 (文件拖拽)
+	logger.Info("标准图片格式检测失败，尝试文件格式 (CF_HDROP)...")
 	if imageData, err := r.tryHDropFormat(); err == nil {
 		return imageData, nil
+	} else {
+		logger.Debugf("CF_HDROP 格式检测失败: %v", err)
 	}
 
-	// If standard formats fail, try MSTSC-specific formats
-	r.logger.Info("文件格式检测失败，尝试 MSTSC 特定格式...")
+	// 如果标准格式失败，尝试 MSTSC 特定格式 (远程桌面)
+	logger.Info("文件格式检测失败，尝试 MSTSC 特定格式...")
 	if imageData, err := r.tryMSTSCFormats(); err == nil {
 		return imageData, nil
+	} else {
+		logger.Debugf("MSTSC 格式检测失败: %v", err)
 	}
 
-	// List all available formats for debugging
+	// 枚举所有可用格式用于调试
 	r.enumClipboardFormats()
 
-	return nil, fmt.Errorf("no supported image data in clipboard")
+	// 提供更详细的错误信息并记录诊断信息
+	owner := r.getClipboardOwner()
+	logger.Debugf("剪贴板所有者窗口: 0x%X", owner)
+
+	// 记录详细的诊断信息帮助调试
+	logger.Warn("剪贴板图片读取失败，记录诊断信息...")
+	r.LogDiagnosticInfo()
+
+	return nil, fmt.Errorf("剪贴板中没有支持的图片数据 (序列号: %d)", finalSeq)
 }
 
 // readImageByFormat reads image data based on specific format
@@ -235,7 +410,7 @@ func (r *WindowsClipboardReader) readImageByFormat(format uintptr, formatName st
 		return nil, fmt.Errorf("failed to get global memory size for %s: %v", formatName, err)
 	}
 
-	r.logger.Debugf("开始读取 %s 格式图片，数据大小: %d bytes", formatName, size)
+	logger.Debugf("开始读取 %s 格式图片，数据大小: %d bytes", formatName, size)
 
 	switch format {
 	case CF_DIBV5:
@@ -313,14 +488,14 @@ func (r *WindowsClipboardReader) processDIBData(pointer, size uintptr) ([]byte, 
 		return nil, fmt.Errorf("unsupported bit count: %d", header.BitCount)
 	}
 
-	r.logger.Debugf("DIB图片处理完成 - 尺寸: %dx%d, 位深度: %d", width, height, header.BitCount)
+	logger.Debugf("DIB图片处理完成 - 尺寸: %dx%d, 位深度: %d", width, height, header.BitCount)
 
 	return r.encodeAndNormalizeImage(img)
 }
 
 // processDIBV5Data processes CF_DIBV5 format data (Remote Desktop)
 func (r *WindowsClipboardReader) processDIBV5Data(pointer, size uintptr) ([]byte, error) {
-	r.logger.Debug("开始处理 DIBV5 格式数据 (远程桌面)")
+	logger.Debug("开始处理 DIBV5 格式数据 (远程桌面)")
 
 	// Read the DIBV5 data
 	data := make([]byte, size)
@@ -347,7 +522,7 @@ func (r *WindowsClipboardReader) processDIBV5Data(pointer, size uintptr) ([]byte
 		height = -height // Top-down bitmap
 	}
 
-	r.logger.Debugf("DIBV5 图片信息 - 尺寸: %dx%d, 位深度: %d, 压缩: %d",
+	logger.Debugf("DIBV5 图片信息 - 尺寸: %dx%d, 位深度: %d, 压缩: %d",
 		width, height, header.BitCount, header.Compression)
 
 	// Calculate stride (bytes per row)
@@ -414,14 +589,14 @@ func (r *WindowsClipboardReader) processDIBV5Data(pointer, size uintptr) ([]byte
 		return nil, fmt.Errorf("unsupported bit count for DIBV5: %d", header.BitCount)
 	}
 
-	r.logger.Debugf("DIBV5图片处理完成 - 尺寸: %dx%d, 位深度: %d", width, height, header.BitCount)
+	logger.Debugf("DIBV5图片处理完成 - 尺寸: %dx%d, 位深度: %d", width, height, header.BitCount)
 
 	return r.encodeAndNormalizeImage(img)
 }
 
 // tryMSTSCFormats 尝试 MSTSC 特定的剪贴板格式
 func (r *WindowsClipboardReader) tryMSTSCFormats() ([]byte, error) {
-	r.logger.Debug("尝试 MSTSC 特定格式...")
+	logger.Debug("尝试 MSTSC 特定格式...")
 
 	// MSTSC 常用的格式名称
 	rdpFormatNames := []string{
@@ -437,7 +612,7 @@ func (r *WindowsClipboardReader) tryMSTSCFormats() ([]byte, error) {
 		if formatID, err := r.registerClipboardFormat(formatName); err == nil {
 			ret, _, _ := procIsClipboardFormatAvailable.Call(uintptr(formatID))
 			if ret != 0 {
-				r.logger.Debugf("检测到 MSTSC 格式: %s (%d)", formatName, formatID)
+				logger.Debugf("检测到 MSTSC 格式: %s (%d)", formatName, formatID)
 				if imageData, err := r.readMSTSCFormatData(uintptr(formatID), formatName); err == nil {
 					return imageData, nil
 				}
@@ -457,7 +632,7 @@ func (r *WindowsClipboardReader) tryMSTSCFormats() ([]byte, error) {
 	for _, formatID := range rdpFormatIDs {
 		ret, _, _ := procIsClipboardFormatAvailable.Call(uintptr(formatID))
 		if ret != 0 {
-			r.logger.Debugf("检测到可能的 RDP 格式: %d", formatID)
+			logger.Debugf("检测到可能的 RDP 格式: %d", formatID)
 			if imageData, err := r.readMSTSCFormatData(uintptr(formatID), fmt.Sprintf("RDP_Format_%d", formatID)); err == nil {
 				return imageData, nil
 			}
@@ -470,9 +645,8 @@ func (r *WindowsClipboardReader) tryMSTSCFormats() ([]byte, error) {
 
 // registerClipboardFormat 注册或获取剪贴板格式 ID
 func (r *WindowsClipboardReader) registerClipboardFormat(formatName string) (uint32, error) {
-	// 使用 RegisterClipboardFormatA
-	shell32 := windows.NewLazySystemDLL("shell32.dll")
-	procRegisterClipboardFormat := shell32.NewProc("RegisterClipboardFormatA")
+	// 使用 RegisterClipboardFormatA (应该在 user32.dll 中)
+	procRegisterClipboardFormat := user32.NewProc("RegisterClipboardFormatA")
 
 	formatNamePtr, err := windows.BytePtrFromString(formatName)
 	if err != nil {
@@ -508,7 +682,7 @@ func (r *WindowsClipboardReader) readMSTSCFormatData(format uintptr, formatName 
 		return nil, fmt.Errorf("failed to get global memory size for %s: %v", formatName, err)
 	}
 
-	r.logger.Debugf("开始读取 MSTSC 格式 %s，数据大小: %d bytes", formatName, size)
+	logger.Debugf("开始读取 MSTSC 格式 %s，数据大小: %d bytes", formatName, size)
 
 	// 读取原始数据
 	data := make([]byte, size)
@@ -526,12 +700,12 @@ func (r *WindowsClipboardReader) tryProcessAsDIB(data []byte) ([]byte, error) {
 
 	// 检查是否是 DIBV5 (124 bytes) 或 DIB (40 bytes)
 	if len(data) >= 124 && data[0] == 124 {
-		r.logger.Debug("MSTSC 数据识别为 DIBV5 格式")
+		logger.Debug("MSTSC 数据识别为 DIBV5 格式")
 		pointer := uintptr(unsafe.Pointer(&data[0]))
 		size := uintptr(len(data))
 		return r.processDIBV5Data(pointer, size)
 	} else if data[0] == 40 {
-		r.logger.Debug("MSTSC 数据识别为 DIB 格式")
+		logger.Debug("MSTSC 数据识别为 DIB 格式")
 		pointer := uintptr(unsafe.Pointer(&data[0]))
 		size := uintptr(len(data))
 		return r.processDIBData(pointer, size)
@@ -540,7 +714,7 @@ func (r *WindowsClipboardReader) tryProcessAsDIB(data []byte) ([]byte, error) {
 	// 如果头部不明显，尝试搜索可能的 DIB 头部
 	for offset := 0; offset < min(100, len(data)-40); offset++ {
 		if data[offset] == 40 || (len(data)-offset >= 124 && data[offset] == 124) {
-			r.logger.Debugf("在偏移 %d 发现可能的 DIB 头部", offset)
+			logger.Debugf("在偏移 %d 发现可能的 DIB 头部", offset)
 			trimmedData := data[offset:]
 			pointer := uintptr(unsafe.Pointer(&trimmedData[0]))
 			size := uintptr(len(trimmedData))
@@ -558,7 +732,7 @@ func (r *WindowsClipboardReader) tryProcessAsDIB(data []byte) ([]byte, error) {
 
 // analyzeAllFormatsForImages 分析所有可用格式寻找图片数据
 func (r *WindowsClipboardReader) analyzeAllFormatsForImages() ([]byte, error) {
-	r.logger.Debug("分析所有剪贴板格式以寻找图片数据...")
+	logger.Debug("分析所有剪贴板格式以寻找图片数据...")
 
 	format := uintptr(0)
 	count := 0
@@ -572,11 +746,11 @@ func (r *WindowsClipboardReader) analyzeAllFormatsForImages() ([]byte, error) {
 
 		// 跳过已知的非图片格式
 		if r.isLikelyImageFormat(nextFormat) {
-			r.logger.Debugf("检查可能的图片格式 %d: 0x%X", count, nextFormat)
+			logger.Debugf("检查可能的图片格式 %d: 0x%X", count, nextFormat)
 
 			// 尝试读取此格式的数据
 			if imageData, err := r.tryReadFormatAsImage(nextFormat); err == nil {
-				r.logger.Infof("成功从格式 0x%X 读取到图片数据", nextFormat)
+				logger.Infof("成功从格式 0x%X 读取到图片数据", nextFormat)
 				return imageData, nil
 			}
 		}
@@ -585,7 +759,7 @@ func (r *WindowsClipboardReader) analyzeAllFormatsForImages() ([]byte, error) {
 
 		// 避免检查过多格式
 		if count >= 30 {
-			r.logger.Debug("已检查足够多格式，停止继续检查")
+			logger.Debug("已检查足够多格式，停止继续检查")
 			break
 		}
 	}
@@ -758,7 +932,7 @@ func (r *WindowsClipboardReader) processBitmapData(handle, pointer, size uintptr
 	// For CF_BITMAP, we need to convert it to DIB first
 	// This is a simplified implementation - in production, you'd use
 	// additional Windows API calls to get bitmap information
-	r.logger.Debug("处理 CF_BITMAP 格式数据")
+	logger.Debug("处理 CF_BITMAP 格式数据")
 
 	// For now, we'll return an error since CF_BITMAP to DIB conversion
 	// requires more complex Windows API interactions
@@ -767,7 +941,7 @@ func (r *WindowsClipboardReader) processBitmapData(handle, pointer, size uintptr
 
 // processEnhMetafileData processes CF_ENHMETAFILE format data
 func (r *WindowsClipboardReader) processEnhMetafileData(handle, pointer, size uintptr) ([]byte, error) {
-	r.logger.Debug("处理 CF_ENHMETAFILE 格式数据")
+	logger.Debug("处理 CF_ENHMETAFILE 格式数据")
 	// Enhanced metafile processing is complex and requires GDI+ or Windows API calls
 	return nil, fmt.Errorf("CF_ENHMETAFILE format not yet implemented")
 }
@@ -777,14 +951,14 @@ func (r *WindowsClipboardReader) processEnhMetafileData(handle, pointer, size ui
 func (r *WindowsClipboardReader) encodeAndNormalizeImage(img stdimage.Image) ([]byte, error) {
 	// Apply image normalization if available
 	if r.normalizer != nil {
-		r.logger.Debug("应用图片标准化处理")
+		logger.Debug("应用图片标准化处理")
 		normalizedImg, err := r.normalizer.NormalizeImage(img)
 		if err != nil {
-			r.logger.Warnf("图片标准化失败，使用原始图片: %v", err)
+			logger.Warnf("图片标准化失败，使用原始图片: %v", err)
 		} else {
 			img = normalizedImg
 			bounds := img.Bounds()
-			r.logger.Debugf("标准化后图片尺寸: %dx%d", bounds.Dx(), bounds.Dy())
+			logger.Debugf("标准化后图片尺寸: %dx%d", bounds.Dx(), bounds.Dy())
 		}
 	}
 
@@ -795,7 +969,7 @@ func (r *WindowsClipboardReader) encodeAndNormalizeImage(img stdimage.Image) ([]
 		return nil, fmt.Errorf("failed to encode image as PNG: %w", err)
 	}
 
-	r.logger.Debugf("PNG编码完成，最终大小: %d bytes", buf.Len())
+	logger.Debugf("PNG编码完成，最终大小: %d bytes", buf.Len())
 
 	// Cache original image if enabled
 	finalImageData := buf.Bytes()
@@ -806,9 +980,9 @@ func (r *WindowsClipboardReader) encodeAndNormalizeImage(img stdimage.Image) ([]
 		// Cache the normalized image
 		cachePath, err := r.configManager.SaveCacheImage(finalImageData, originalFilename)
 		if err != nil {
-			r.logger.Warnf("缓存图片失败: %v", err)
+			logger.Warnf("缓存图片失败: %v", err)
 		} else {
-			r.logger.Infof("图片已缓存: %s", cachePath)
+			logger.Infof("图片已缓存: %s", cachePath)
 		}
 	}
 
@@ -817,7 +991,7 @@ func (r *WindowsClipboardReader) encodeAndNormalizeImage(img stdimage.Image) ([]
 
 // enumClipboardFormats lists all available clipboard formats for debugging
 func (r *WindowsClipboardReader) enumClipboardFormats() {
-	r.logger.Debug("枚举剪贴板格式...")
+	logger.Debug("枚举剪贴板格式...")
 	format := uintptr(0)
 	count := 0
 
@@ -827,18 +1001,18 @@ func (r *WindowsClipboardReader) enumClipboardFormats() {
 			break
 		}
 		count++
-		r.logger.Debugf("可用格式 %d: %d", count, nextFormat)
+		logger.Debugf("可用格式 %d: %d", count, nextFormat)
 		format = nextFormat
 
 		// Limit to first 10 formats to avoid spam
 		if count >= 10 {
-			r.logger.Debug("...")
+			logger.Debug("...")
 			break
 		}
 	}
 
 	if count == 0 {
-		r.logger.Debug("剪贴板中没有可用格式")
+		logger.Debug("剪贴板中没有可用格式")
 	}
 }
 
@@ -855,7 +1029,7 @@ func (r *WindowsClipboardReader) HasContent() (bool, error) {
 		for _, format := range imageFormats {
 			ret, _, _ := procIsClipboardFormatAvailable.Call(format)
 			if ret != 0 {
-				r.logger.Debugf("检测到图片格式可用: %d", format)
+				logger.Debugf("检测到图片格式可用: %d", format)
 				return true, nil
 			}
 		}
@@ -882,7 +1056,7 @@ func (r *WindowsClipboardReader) GetContentType() (models.ContentType, error) {
 		for _, format := range imageFormats {
 			ret, _, _ := procIsClipboardFormatAvailable.Call(format)
 			if ret != 0 {
-				r.logger.Debugf("检测到图片格式: %d", format)
+				logger.Debugf("检测到图片格式: %d", format)
 				return models.ContentTypeImage, nil
 			}
 		}
@@ -943,7 +1117,7 @@ func (r *WindowsClipboardReader) convertBGRAtoRGBA(pixelData []byte, width, heig
 		}
 	}
 
-	r.logger.Debugf("BGRA图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
+	logger.Debugf("BGRA图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
 	return img
 }
 
@@ -968,7 +1142,7 @@ func (r *WindowsClipboardReader) convertBGRtoRGB(pixelData []byte, width, height
 		}
 	}
 
-	r.logger.Debugf("BGR图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
+	logger.Debugf("BGR图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
 	return img
 }
 
@@ -996,7 +1170,7 @@ func (r *WindowsClipboardReader) convert8BitToRGBA(pixelData, palette []byte, wi
 		}
 	}
 
-	r.logger.Debugf("8位调色板图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
+	logger.Debugf("8位调色板图片转换完成，已应用Y轴翻转，尺寸: %dx%d", width, height)
 	return img
 }
 
@@ -1066,7 +1240,7 @@ func ValidateClipboardContent(content *models.ClipboardContent) error {
 
 // tryHDropFormat 尝试从 CF_HDROP 格式读取图片文件
 func (r *WindowsClipboardReader) tryHDropFormat() ([]byte, error) {
-	r.logger.Debug("尝试 CF_HDROP (文件) 格式...")
+	logger.Debug("尝试 CF_HDROP (文件) 格式...")
 
 	// 检查 CF_HDROP 格式是否可用
 	ret, _, _ := procIsClipboardFormatAvailable.Call(CF_HDROP)
@@ -1093,7 +1267,7 @@ func (r *WindowsClipboardReader) tryHDropFormat() ([]byte, error) {
 		return nil, fmt.Errorf("failed to get global memory size for CF_HDROP: %v", err)
 	}
 
-	r.logger.Debugf("开始读取 CF_HDROP 数据，大小: %d bytes", size)
+	logger.Debugf("开始读取 CF_HDROP 数据，大小: %d bytes", size)
 
 	// 读取原始数据
 	data := make([]byte, size)
@@ -1121,52 +1295,52 @@ func (r *WindowsClipboardReader) tryHDropFormat() ([]byte, error) {
 	filesData := data[filesOffset:]
 	fileList := r.parseFileList(filesData, dropFiles.fWide != 0)
 
-	r.logger.Debugf("CF_HDROP 解析到 %d 个文件", len(fileList))
+	logger.Debugf("CF_HDROP 解析到 %d 个文件", len(fileList))
 
 	// 查找第一个图片文件
 	for _, filePath := range fileList {
 		if r.isImageFile(filePath) {
-			r.logger.Debugf("找到图片文件: %s", filePath)
+			logger.Debugf("找到图片文件: %s", filePath)
 
 			// 检查文件是否存在
 			if _, err := os.Stat(filePath); err != nil {
-				r.logger.Warnf("图片文件不存在: %s, 错误: %v", filePath, err)
+				logger.Warnf("图片文件不存在: %s, 错误: %v", filePath, err)
 				continue
 			}
 
 			// 读取图片文件
 			imageData, err := os.ReadFile(filePath)
 			if err != nil {
-				r.logger.Warnf("读取图片文件失败: %s, 错误: %v", filePath, err)
+				logger.Warnf("读取图片文件失败: %s, 错误: %v", filePath, err)
 				continue
 			}
 
-			r.logger.Infof("成功从文件读取图片: %s, 大小: %d bytes", filePath, len(imageData))
+			logger.Infof("成功从文件读取图片: %s, 大小: %d bytes", filePath, len(imageData))
 
 			// 应用图片标准化
 			if r.normalizer != nil {
-				r.logger.Debug("应用图片标准化处理到文件图片")
+				logger.Debug("应用图片标准化处理到文件图片")
 
 				// 解码图片
 				img, _, err := stdimage.Decode(bytes.NewBuffer(imageData))
 				if err != nil {
-					r.logger.Warnf("解码文件图片失败，使用原始数据: %v", err)
+					logger.Warnf("解码文件图片失败，使用原始数据: %v", err)
 				} else {
 					normalizedImg, err := r.normalizer.NormalizeImage(img)
 					if err != nil {
-						r.logger.Warnf("文件图片标准化失败，使用原始图片: %v", err)
+						logger.Warnf("文件图片标准化失败，使用原始图片: %v", err)
 					} else {
 						bounds := normalizedImg.Bounds()
-						r.logger.Debugf("文件图片标准化后尺寸: %dx%d", bounds.Dx(), bounds.Dy())
+						logger.Debugf("文件图片标准化后尺寸: %dx%d", bounds.Dx(), bounds.Dy())
 
 						// 重新编码为 PNG
 						var buf bytes.Buffer
 						err = png.Encode(&buf, normalizedImg)
 						if err != nil {
-							r.logger.Warnf("编码标准化图片失败，使用原始数据: %v", err)
+							logger.Warnf("编码标准化图片失败，使用原始数据: %v", err)
 						} else {
 							imageData = buf.Bytes()
-							r.logger.Debugf("文件图片标准化完成，最终大小: %d bytes", len(imageData))
+							logger.Debugf("文件图片标准化完成，最终大小: %d bytes", len(imageData))
 						}
 					}
 				}
@@ -1178,9 +1352,9 @@ func (r *WindowsClipboardReader) tryHDropFormat() ([]byte, error) {
 				originalFilename := fmt.Sprintf("hdrop_file_%s.png", timestamp)
 				cachePath, err := r.configManager.SaveCacheImage(imageData, originalFilename)
 				if err != nil {
-					r.logger.Warnf("缓存HDROP图片失败: %v", err)
+					logger.Warnf("缓存HDROP图片失败: %v", err)
 				} else {
-					r.logger.Infof("HDROP图片已缓存: %s", cachePath)
+					logger.Infof("HDROP图片已缓存: %s", cachePath)
 				}
 			}
 
@@ -1255,4 +1429,116 @@ func (r *WindowsClipboardReader) isImageFile(filePath string) bool {
 		}
 	}
 	return false
+}
+
+// ClipboardDiagnosticInfo 剪贴板诊断信息
+type ClipboardDiagnosticInfo struct {
+	SequenceNumber     uint32        `json:"sequence_number"`
+	IsLocked           bool          `json:"is_locked"`
+	OwnerWindow        uintptr       `json:"owner_window"`
+	AvailableFormats   []string      `json:"available_formats"`
+	LastError          string        `json:"last_error,omitempty"`
+	RetryAttempts      int           `json:"retry_attempts"`
+	TotalWaitTime      time.Duration `json:"total_wait_time"`
+}
+
+// DiagnoseClipboard 诊断剪贴板状态
+func (r *WindowsClipboardReader) DiagnoseClipboard() *ClipboardDiagnosticInfo {
+	info := &ClipboardDiagnosticInfo{
+		SequenceNumber: r.getClipboardSequenceNumber(),
+		IsLocked:      r.isClipboardLocked(),
+		OwnerWindow:   r.getClipboardOwner(),
+	}
+
+	if info.IsLocked {
+		info.OwnerWindow = r.getOpenClipboardWindow()
+	}
+
+	// 尝试获取可用格式
+	info.AvailableFormats = r.getAvailableFormats()
+
+	return info
+}
+
+// getAvailableFormats 获取所有可用的剪贴板格式（用于诊断）
+func (r *WindowsClipboardReader) getAvailableFormats() []string {
+	var formats []string
+
+	// 尝试打开剪贴板（不重试，用于诊断）
+	ret, _, err := procOpenClipboard.Call(0)
+	if ret == 0 {
+		// 记录错误但继续返回已知信息
+		if err != nil {
+			info := fmt.Sprintf("OpenClipboard失败: %v", err)
+			formats = append(formats, info)
+		}
+		return formats
+	}
+	defer procCloseClipboard.Call()
+
+	// 检查标准格式
+	standardFormats := map[uintptr]string{
+		CF_TEXT:        "CF_TEXT",
+		CF_UNICODETEXT: "CF_UNICODETEXT",
+		CF_DIB:         "CF_DIB",
+		CF_DIBV5:       "CF_DIBV5",
+		CF_BITMAP:      "CF_BITMAP",
+		CF_ENHMETAFILE: "CF_ENHMETAFILE",
+		CF_HDROP:       "CF_HDROP",
+	}
+
+	for format, name := range standardFormats {
+		ret, _, _ := procIsClipboardFormatAvailable.Call(format)
+		if ret != 0 {
+			formats = append(formats, name)
+		}
+	}
+
+	// 枚举其他格式
+	format := uintptr(0)
+	count := 0
+	for {
+		nextFormat, _, _ := procEnumClipboardFormats.Call(format)
+		if nextFormat == 0 {
+			break
+		}
+		count++
+
+		// 跳过已知的标准格式
+		if _, exists := standardFormats[nextFormat]; !exists {
+			formats = append(formats, fmt.Sprintf("CustomFormat_%d", nextFormat))
+		}
+
+		format = nextFormat
+
+		// 限制数量避免过多信息
+		if count >= 20 {
+			formats = append(formats, "...")
+			break
+		}
+	}
+
+	return formats
+}
+
+// LogDiagnosticInfo 记录剪贴板诊断信息
+func (r *WindowsClipboardReader) LogDiagnosticInfo() {
+	info := r.DiagnoseClipboard()
+
+	logger.Infof("=== 剪贴板诊断信息 ===")
+	logger.Infof("序列号: %d", info.SequenceNumber)
+	logger.Infof("锁定状态: %v", info.IsLocked)
+
+	if info.IsLocked {
+		logger.Infof("占用窗口: 0x%X", info.OwnerWindow)
+	}
+
+	if len(info.AvailableFormats) > 0 {
+		logger.Infof("可用格式 (%d): %s", len(info.AvailableFormats),
+			strings.Join(info.AvailableFormats, ", "))
+	} else {
+		logger.Info("未检测到可用格式")
+	}
+
+	logger.Infof("===================")
 }

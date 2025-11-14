@@ -111,3 +111,4 @@ The application sends data in a format compatible with Microsoft Todo:
 - No password storage or management needed
 - Requires Azure AD application registration and API permissions
 - 使用 github.com/WQGroup/logger 作为项目的日志库
+- 使用 github.com/WQGroup/logger 库来记录日志
