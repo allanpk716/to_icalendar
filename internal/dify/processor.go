@@ -244,6 +244,9 @@ func (p *Processor) parseTaskJSON(jsonStr string) (*models.ParsedTaskInfo, error
 	log.Printf("任务JSON解析成功: 标题='%s', 日期='%s', 时间='%s'",
 		taskInfo.Title, taskInfo.Date, taskInfo.Time)
 
+	// 对于成功解析的JSON，设置高置信度
+	taskInfo.Confidence = 0.9
+
 	return &taskInfo, nil
 }
 
