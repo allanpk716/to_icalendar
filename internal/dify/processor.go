@@ -63,8 +63,8 @@ func (p *Processor) ProcessImage(ctx context.Context, imageData []byte, fileName
 
 	log.Printf("Dify API响应: %s", difyResp.Answer)
 
-	// 解析Dify响应
-	parsedInfo, err := p.parseDifyResponse(difyResp.Answer)
+	// 解析Dify响应 - 使用工作流响应解析器
+	parsedInfo, err := p.parseDifyWorkflowResponse(difyResp)
 	if err != nil {
 		log.Printf("解析Dify响应失败: %v", err)
 		return &ProcessingResponse{
@@ -123,8 +123,8 @@ func (p *Processor) ProcessText(ctx context.Context, text string) (*ProcessingRe
 
 	log.Printf("Dify API响应: %s", difyResp.Answer)
 
-	// 解析Dify响应
-	parsedInfo, err := p.parseDifyResponse(difyResp.Answer)
+	// 解析Dify响应 - 使用工作流响应解析器
+	parsedInfo, err := p.parseDifyWorkflowResponse(difyResp)
 	if err != nil {
 		log.Printf("解析Dify响应失败: %v", err)
 		return &ProcessingResponse{
@@ -182,6 +182,69 @@ func (p *Processor) parseDifyResponse(response string) (*models.ParsedTaskInfo, 
 		Confidence:   0.0,
 		Description:  fmt.Sprintf("无法解析Dify响应: %s", response),
 	}, fmt.Errorf("failed to parse Dify response as JSON")
+}
+
+// parseDifyWorkflowResponse parses the response from Dify workflow API
+func (p *Processor) parseDifyWorkflowResponse(difyResp *models.DifyResponse) (*models.ParsedTaskInfo, error) {
+	// 首先检查Answer字段（适用于chat-messages）
+	if difyResp.Answer != "" {
+		log.Printf("从Answer字段解析响应")
+		return p.parseDifyResponse(difyResp.Answer)
+	}
+
+	// 检查工作流响应的Data.Outputs.Text字段
+	if difyResp.Data != nil && difyResp.Data.Outputs != nil && difyResp.Data.Outputs.Text != "" {
+		log.Printf("从工作流Data.Outputs.Text字段解析响应")
+		return p.parseTaskJSON(difyResp.Data.Outputs.Text)
+	}
+
+	// 如果两者都为空，返回错误
+	return &models.ParsedTaskInfo{
+		OriginalText: "",
+		Confidence:   0.0,
+		Description:  "Dify响应中没有找到有效内容",
+	}, fmt.Errorf("no valid content found in Dify response")
+}
+
+// parseTaskJSON 解析任务JSON字符串（处理转义字符）
+func (p *Processor) parseTaskJSON(jsonStr string) (*models.ParsedTaskInfo, error) {
+	log.Printf("尝试解析任务JSON，原始长度: %d", len(jsonStr))
+	log.Printf("原始JSON字符串: %s", jsonStr)
+
+	// 清理JSON字符串
+	jsonStr = strings.TrimSpace(jsonStr)
+	if jsonStr == "" {
+		return nil, fmt.Errorf("empty JSON string")
+	}
+
+	// 如果JSON字符串被引号包围，去掉引号
+	if len(jsonStr) >= 2 && jsonStr[0] == '"' && jsonStr[len(jsonStr)-1] == '"' {
+		jsonStr = jsonStr[1 : len(jsonStr)-1]
+		log.Printf("去除引号后: %s", jsonStr)
+
+		// 处理转义字符 - 使用更完整的转义处理
+		jsonStr = strings.ReplaceAll(jsonStr, "\\\"", "\"")
+		jsonStr = strings.ReplaceAll(jsonStr, "\\\\", "\\")
+		jsonStr = strings.ReplaceAll(jsonStr, "\\n", "\n")
+		jsonStr = strings.ReplaceAll(jsonStr, "\\t", "\t")
+		jsonStr = strings.ReplaceAll(jsonStr, "\\r", "\r")
+		jsonStr = strings.ReplaceAll(jsonStr, "\\f", "\f")
+		jsonStr = strings.ReplaceAll(jsonStr, "\\b", "\b")
+
+		log.Printf("处理转义字符后: %s", jsonStr)
+	}
+
+	// 尝试解析JSON
+	var taskInfo models.ParsedTaskInfo
+	if err := json.Unmarshal([]byte(jsonStr), &taskInfo); err != nil {
+		log.Printf("JSON解析失败: %v, 原始内容: %s", err, jsonStr)
+		return nil, fmt.Errorf("failed to parse task JSON: %w", err)
+	}
+
+	log.Printf("任务JSON解析成功: 标题='%s', 日期='%s', 时间='%s'",
+		taskInfo.Title, taskInfo.Date, taskInfo.Time)
+
+	return &taskInfo, nil
 }
 
 // validateParsedInfo validates the parsed task information

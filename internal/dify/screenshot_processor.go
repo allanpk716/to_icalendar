@@ -96,6 +96,15 @@ func (p *ScreenshotProcessorImpl) ProcessScreenshot(ctx context.Context, screens
 	}
 
 	log.Printf("[ScreenshotProcessor] Dify响应文本: %s", responseText)
+	log.Printf("[ScreenshotProcessor] 响应文本长度: %d", len(responseText))
+
+	// 输出原始响应用于调试
+	log.Printf("[ScreenshotProcessor] 原始响应（前500字符）: %s", func() string {
+		if len(responseText) > 500 {
+			return responseText[:500] + "..."
+		}
+		return responseText
+	}())
 
 	parsedInfo, err := p.parser.ParseReminderResponse(responseText)
 	if err != nil {
