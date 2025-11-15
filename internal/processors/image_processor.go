@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/internal/deduplication"
 	"github.com/allanpk716/to_icalendar/internal/dify"
 	"github.com/allanpk716/to_icalendar/internal/image"
 	"github.com/allanpk716/to_icalendar/internal/models"
@@ -21,11 +22,17 @@ type ImageProcessor struct {
 	tempDir        string
 	normalizer     *image.ImageNormalizer
 	configManager  *image.ConfigManager
+	deduplicator   *deduplication.Deduplicator
 	logger         *logrus.Logger
 }
 
 // NewImageProcessor creates a new image processor
 func NewImageProcessor(difyProcessor *dify.Processor) (*ImageProcessor, error) {
+	return NewImageProcessorWithDeduplication(difyProcessor, nil)
+}
+
+// NewImageProcessorWithDeduplication creates a new image processor with deduplication
+func NewImageProcessorWithDeduplication(difyProcessor *dify.Processor, deduplicator *deduplication.Deduplicator) (*ImageProcessor, error) {
 	// 创建临时目录
 	tempDir := filepath.Join(os.TempDir(), "to_icalendar_images")
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
@@ -42,6 +49,7 @@ func NewImageProcessor(difyProcessor *dify.Processor) (*ImageProcessor, error) {
 		difyProcessor: difyProcessor,
 		tempDir:       tempDir,
 		configManager: configManager,
+		deduplicator:  deduplicator,
 		logger:        logger,
 	}, nil
 }
@@ -82,6 +90,31 @@ func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData [
 			ErrorMessage: "图片数据为空",
 			ProcessingTime: time.Since(startTime),
 		}, fmt.Errorf("image data is empty")
+	}
+
+	// 检查图片是否已经处理过（如果启用了去重功能）
+	if ip.deduplicator != nil {
+		log.Printf("检查图片去重...")
+		dedupResult, err := ip.deduplicator.CheckImageDuplicate(imageData)
+		if err != nil {
+			log.Printf("图片去重检查失败: %v，继续处理", err)
+		} else if dedupResult.IsDuplicate {
+			log.Printf("发现重复图片: %s", dedupResult.SkipReason)
+
+			// 如果之前处理失败且建议重新处理，则继续处理
+			if dedupResult.SuggestedAction == "create" {
+				log.Printf("图片之前处理失败，重新处理")
+			} else {
+				// 返回跳过的结果
+				return &models.ProcessingResult{
+					Success:        true,
+					ErrorMessage:   fmt.Sprintf("图片已处理过，跳过重复处理: %s", dedupResult.SkipReason),
+					ProcessingTime: time.Since(startTime),
+				}, nil
+			}
+		} else {
+			log.Printf("图片去重检查通过，哈希: %s", dedupResult.ImageHash)
+		}
 	}
 
 	// 生成临时文件名
@@ -149,6 +182,32 @@ func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData [
 		ParsedInfo:     response.ParsedInfo,
 		ErrorMessage:   response.ErrorMessage,
 		ProcessingTime: time.Since(startTime),
+	}
+
+	// 记录图片处理结果到缓存（如果启用了去重功能）
+	if ip.deduplicator != nil {
+		taskHash := ""
+		title := ""
+		if result.Reminder != nil {
+			// 生成任务哈希用于关联
+			if parsedReminder, err := models.ParseReminderTime(*result.Reminder, time.Local); err == nil {
+				// 通过去重器的缓存管理器生成哈希
+				cacheManager := ip.deduplicator.GetCacheManager()
+				if cacheManager != nil {
+					taskHash = cacheManager.GenerateTaskHash(parsedReminder)
+				}
+			}
+			title = result.Reminder.Title
+		} else if result.ParsedInfo != nil {
+			title = result.ParsedInfo.Title
+		}
+
+		processTime := result.ProcessingTime.String()
+		if err := ip.deduplicator.RecordProcessedImage(imageData, taskHash, title, result.Success, processTime, tempFilePath); err != nil {
+			log.Printf("记录图片处理结果失败: %v", err)
+		} else {
+			log.Printf("图片处理结果已记录到缓存")
+		}
 	}
 
 	log.Printf("图片处理完成，成功: %v", result.Success)

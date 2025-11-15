@@ -23,14 +23,16 @@ type Cleaner struct {
 
 // CleanOptions 清理选项
 type CleanOptions struct {
-	All        bool   // 清理所有缓存
-	Tasks      bool   // 清理任务缓存
-	Images     bool   // 清理图片缓存
-	Temp       bool   // 清理临时文件
-	Generated  bool   // 清理生成的JSON文件
-	DryRun     bool   // 预览模式，不实际删除
-	Force      bool   // 强制清理，跳过确认
-	OlderThan  string // 时间过滤，如 "7d", "24h"
+	All           bool   // 清理所有缓存
+	Tasks         bool   // 清理任务缓存
+	Images        bool   // 清理图片缓存
+	ImageHashes   bool   // 清理图片哈希缓存
+	Temp          bool   // 清理临时文件
+	Generated     bool   // 清理生成的JSON文件
+	DryRun        bool   // 预览模式，不实际删除
+	Force         bool   // 强制清理，跳过确认
+	OlderThan     string // 时间过滤，如 "7d", "24h"
+	ClearAll      bool   // 完全清空所有缓存数据
 }
 
 // CleanResult 清理结果
@@ -84,8 +86,13 @@ func (c *Cleaner) Clean(options CleanOptions) (*CleanSummary, error) {
 		summary.Results = append(summary.Results, result)
 	}
 
-	if options.All || options.Images {
+	if options.All || options.Images || options.ImageHashes {
 		result := c.cleanImagesCache(options.DryRun, olderThanTime)
+		summary.Results = append(summary.Results, result)
+	}
+
+	if options.ImageHashes {
+		result := c.cleanImageHashCache(options.DryRun)
 		summary.Results = append(summary.Results, result)
 	}
 
@@ -97,6 +104,15 @@ func (c *Cleaner) Clean(options CleanOptions) (*CleanSummary, error) {
 	if options.All || options.Generated {
 		result := c.cleanGeneratedFiles(options.DryRun, olderThanTime)
 		summary.Results = append(summary.Results, result)
+	}
+
+	// 如果设置了完全清空选项
+	if options.ClearAll && c.cacheManager != nil && !options.DryRun {
+		if err := c.cacheManager.ClearCache(); err != nil {
+			c.logger.Printf("清空所有缓存失败: %v", err)
+		} else {
+			c.logger.Printf("已清空所有缓存数据")
+		}
 	}
 
 	summary.Duration = time.Since(startTime)
@@ -208,53 +224,129 @@ func (c *Cleaner) cleanImagesCache(dryRun bool, olderThanTime time.Time) CleanRe
 		result.Duration = time.Since(startTime)
 	}()
 
-	// 获取图片缓存目录
+	// 1. 清理图片文件缓存
 	cacheDir := c.getImageCacheDir()
-	if cacheDir == "" {
-		result.Error = fmt.Errorf("无法获取图片缓存目录路径")
+	if cacheDir != "" {
+		err := filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// 跳过目录本身
+			if info.IsDir() {
+				return nil
+			}
+
+			// 只处理图片文件
+			if !c.isImageFile(path) {
+				return nil
+			}
+
+			// 检查文件时间
+			if !olderThanTime.IsZero() && info.ModTime().After(olderThanTime) {
+				return nil
+			}
+
+			// 收集文件信息
+			result.FilesCount++
+			result.SizeBytes += info.Size()
+			result.Files = append(result.Files, path)
+
+			// 如果不是预览模式，则删除文件
+			if !dryRun {
+				if err := os.Remove(path); err != nil {
+					result.Error = fmt.Errorf("删除图片文件 %s 失败: %v", path, err)
+					return err
+				}
+				c.logger.Printf("已删除图片缓存文件: %s", path)
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			result.Error = fmt.Errorf("清理图片文件缓存失败: %v", err)
+			return result
+		}
+	}
+
+	// 2. 清理图片哈希缓存文件
+	if c.cacheManager != nil {
+		cacheDir = c.cacheManager.GetCacheDir()
+		if cacheDir != "" {
+			imageHashFile := filepath.Join(cacheDir, "image_hashes.json")
+
+			// 检查文件是否存在
+			if info, err := os.Stat(imageHashFile); err == nil {
+				// 检查文件时间
+				if olderThanTime.IsZero() || info.ModTime().Before(olderThanTime) || dryRun {
+					result.FilesCount++
+					result.SizeBytes += info.Size()
+					result.Files = append(result.Files, imageHashFile)
+
+					// 如果不是预览模式，则清理图片哈希缓存
+					if !dryRun {
+						// 使用缓存管理器的清理方法，这样会处理过期数据
+						if err := c.cacheManager.CleanupExpiredImages(); err != nil {
+							result.Error = fmt.Errorf("清理图片哈希缓存失败: %v", err)
+							return result
+						}
+						c.logger.Printf("已清理图片哈希缓存: %s", imageHashFile)
+					}
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// cleanImageHashCache 专门清理图片哈希缓存
+func (c *Cleaner) cleanImageHashCache(dryRun bool) CleanResult {
+	result := CleanResult{
+		CacheType: "图片哈希缓存",
+		Files:     make([]string, 0),
+	}
+
+	startTime := time.Now()
+	defer func() {
+		result.Duration = time.Since(startTime)
+	}()
+
+	if c.cacheManager == nil {
+		result.Error = fmt.Errorf("缓存管理器未初始化")
 		return result
 	}
 
-	// 遍历图片缓存目录
-	err := filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+	// 获取缓存目录路径
+	cacheDir := c.cacheManager.GetCacheDir()
+	if cacheDir == "" {
+		result.Error = fmt.Errorf("无法获取缓存目录路径")
+		return result
+	}
 
-		// 跳过目录本身
-		if info.IsDir() {
-			return nil
-		}
+	// 图片哈希缓存文件路径
+	imageHashFile := filepath.Join(cacheDir, "image_hashes.json")
 
-		// 只处理图片文件
-		if !c.isImageFile(path) {
-			return nil
-		}
-
-		// 检查文件时间
-		if !olderThanTime.IsZero() && info.ModTime().After(olderThanTime) {
-			return nil
-		}
-
-		// 收集文件信息
+	// 检查文件是否存在
+	if info, err := os.Stat(imageHashFile); err == nil {
 		result.FilesCount++
 		result.SizeBytes += info.Size()
-		result.Files = append(result.Files, path)
+		result.Files = append(result.Files, imageHashFile)
 
-		// 如果不是预览模式，则删除文件
+		// 如果不是预览模式，则清空图片哈希缓存
 		if !dryRun {
-			if err := os.Remove(path); err != nil {
-				result.Error = fmt.Errorf("删除图片文件 %s 失败: %v", path, err)
-				return err
+			if err := c.cacheManager.ClearImageCache(); err != nil {
+				result.Error = fmt.Errorf("清空图片哈希缓存失败: %v", err)
+				return result
 			}
-			c.logger.Printf("已删除图片缓存文件: %s", path)
+			c.logger.Printf("已清空图片哈希缓存: %s", imageHashFile)
 		}
-
-		return nil
-	})
-
-	if err != nil {
-		result.Error = fmt.Errorf("清理图片缓存失败: %v", err)
+	} else if os.IsNotExist(err) {
+		c.logger.Printf("图片哈希缓存文件不存在，跳过: %s", imageHashFile)
+	} else {
+		result.Error = fmt.Errorf("检查图片哈希缓存文件失败: %v", err)
+		return result
 	}
 
 	return result

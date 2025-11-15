@@ -39,14 +39,16 @@ type CommandOptions struct {
 
 // CleanOptions 清理命令选项
 type CleanOptions struct {
-	All        bool
-	Tasks      bool
-	Images     bool
-	Temp       bool
-	Generated  bool
-	DryRun     bool
-	Force      bool
-	OlderThan  string
+	All          bool
+	Tasks        bool
+	Images       bool
+	ImageHashes  bool
+	Temp         bool
+	Generated    bool
+	DryRun       bool
+	Force        bool
+	OlderThan    string
+	ClearAll     bool
 }
 
 // getConfigDir 获取配置文件目录路径
@@ -107,14 +109,16 @@ func parseCommandOptions(args []string) CommandOptions {
 // parseCleanOptions 解析清理命令选项
 func parseCleanOptions(args []string) CleanOptions {
 	options := CleanOptions{
-		All:        false,
-		Tasks:      false,
-		Images:     false,
-		Temp:       false,
-		Generated:  false,
-		DryRun:     false,
-		Force:      false,
-		OlderThan:  "",
+		All:         false,
+		Tasks:       false,
+		Images:      false,
+		ImageHashes: false,
+		Temp:        false,
+		Generated:   false,
+		DryRun:      false,
+		Force:       false,
+		OlderThan:   "",
+		ClearAll:    false,
 	}
 
 	for i, arg := range args {
@@ -125,6 +129,8 @@ func parseCleanOptions(args []string) CleanOptions {
 			options.Tasks = true
 		case "--images":
 			options.Images = true
+		case "--image-hashes":
+			options.ImageHashes = true
 		case "--temp":
 			options.Temp = true
 		case "--generated":
@@ -137,11 +143,13 @@ func parseCleanOptions(args []string) CleanOptions {
 			if i+1 < len(args) {
 				options.OlderThan = args[i+1]
 			}
+		case "--clear-all":
+			options.ClearAll = true
 		}
 	}
 
 	// 如果没有指定任何具体类型，默认清理所有
-	if !options.Tasks && !options.Images && !options.Temp && !options.Generated {
+	if !options.Tasks && !options.Images && !options.ImageHashes && !options.Temp && !options.Generated {
 		options.All = true
 	}
 
@@ -645,11 +653,13 @@ Options:
     --all                   Clean all cache types (default)
     --tasks                 Clean task deduplication cache only
     --images                Clean image cache only
+    --image-hashes          Clean image hash cache only
     --temp                  Clean temporary files only
     --generated             Clean generated JSON files only
     --dry-run               Preview files to be cleaned (without deleting)
     --force                 Skip confirmation and clean directly
     --older-than 7d         Only clean files older than specified time (7d, 24h, 30m)
+    --clear-all             Completely clear all cache data
 
 Examples:
   %s init                                          # Initialize configuration
@@ -662,7 +672,9 @@ Examples:
   %s clip-upload --force-upload                   # Process clipboard and upload, ignore duplicates
   %s clean --dry-run                               # Preview files to be cleaned
   %s clean --tasks --force                         # Force clean task cache
+  %s clean --image-hashes --force                 # Force clean image hash cache
   %s clean --older-than 7d                         # Clean files older than 7 days
+  %s clean --clear-all --force                     # Completely clear all cache data
 
 Configuration files:
   ~/.to_icalendar/server.yaml       Service configuration (Microsoft Todo & Dify)
@@ -671,6 +683,7 @@ Configuration files:
 Deduplication:
   The application supports intelligent deduplication to avoid creating duplicate tasks:
   - Local cache for fast offline checking
+  - Image SHA-256 hashing for visual content deduplication
   - Remote query to check Microsoft Todo for existing tasks
   - Similarity matching for near-duplicates
   - Only checks incomplete tasks by default (configurable)
@@ -742,8 +755,29 @@ func handleClip() {
 	// Initialize Dify processor
 	difyProcessor := dify.NewProcessor(difyClient, "clipboard-user", processingOptions)
 
-	// Initialize image processor
-	imageProcessor, err := processors.NewImageProcessor(difyProcessor)
+	// Initialize deduplication service (same as clip-upload)
+	dedupConfig := serverConfig.Deduplication
+	var deduplicator *deduplication.Deduplicator
+	var cacheManager *deduplication.CacheManager
+
+	if dedupConfig.Enabled {
+		fmt.Println("✓ Deduplication enabled")
+
+		// Initialize cache manager
+		cacheDir := filepath.Join(configDir, "cache")
+		cacheManager = deduplication.NewCacheManager(cacheDir, nil)
+
+		// Initialize deduplicator (简化版 - 仅本地缓存)
+		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
+	}
+
+	// Initialize image processor with deduplication
+	var imageProcessor *processors.ImageProcessor
+	if deduplicator != nil {
+		imageProcessor, err = processors.NewImageProcessorWithDeduplication(difyProcessor, deduplicator)
+	} else {
+		imageProcessor, err = processors.NewImageProcessor(difyProcessor)
+	}
 	if err != nil {
 		log.Fatalf("Failed to create image processor: %v", err)
 	}
@@ -923,6 +957,42 @@ func handleClipUpload(options CommandOptions) {
 
 	fmt.Printf("✓ Detected content type: %s\n", contentType)
 
+	// Initialize deduplication service for clip-upload (before content processing)
+	var deduplicator *deduplication.Deduplicator
+	var cacheManager *deduplication.CacheManager
+
+	// Apply command line options to configuration
+	dedupConfig := serverConfig.Deduplication
+	if options.NoDeduplication {
+		dedupConfig.Enabled = false
+	}
+	if options.ForceUpload {
+		dedupConfig.Enabled = false
+	}
+	if options.IncludeCompleted {
+		dedupConfig.CheckIncompleteOnly = false
+	}
+
+	if dedupConfig.Enabled {
+		fmt.Println("✓ Deduplication enabled")
+
+		// Initialize cache manager
+		configDir, _ := getConfigDir()
+		cacheDir := filepath.Join(configDir, "cache")
+		cacheManager = deduplication.NewCacheManager(cacheDir, nil)
+
+		// Initialize deduplicator (简化版 - 仅本地缓存)
+		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
+	} else {
+		if options.NoDeduplication {
+			fmt.Println("  ⚠️ Deduplication disabled by command line option")
+		} else if options.ForceUpload {
+			fmt.Println("  ⚠️ Deduplication disabled due to force upload")
+		} else {
+			fmt.Println("  ⚠️ Deduplication disabled in configuration")
+		}
+	}
+
 	var processingResult *models.ProcessingResult
 
 	// Process based on content type
@@ -943,10 +1013,10 @@ func handleClipUpload(options CommandOptions) {
 
 		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", processingOptions)
 
-		// Initialize image processor
-		imageProcessor, err := processors.NewImageProcessor(difyProcessor)
+		// Initialize image processor with deduplication
+		imageProcessor, err := processors.NewImageProcessorWithDeduplication(difyProcessor, deduplicator)
 		if err != nil {
-			log.Fatalf("Failed to create image processor: %v", err)
+			log.Fatalf("Failed to create image processor with deduplication: %v", err)
 		}
 		defer imageProcessor.Cleanup()
 
@@ -1081,7 +1151,7 @@ func handleClipUpload(options CommandOptions) {
 	}
 
 	// Apply command line options to configuration
-	dedupConfig := serverConfig.Deduplication
+	dedupConfig = serverConfig.Deduplication
 	if options.NoDeduplication {
 		dedupConfig.Enabled = false
 	}
@@ -1092,46 +1162,32 @@ func handleClipUpload(options CommandOptions) {
 		dedupConfig.CheckIncompleteOnly = false
 	}
 
-	// Initialize deduplication service for clip-upload
-	var deduplicator *deduplication.Deduplicator
-	var cacheManager *deduplication.CacheManager
-
-	if dedupConfig.Enabled {
-		fmt.Println("✓ Deduplication enabled")
-
-		// Initialize cache manager
-		configDir, _ := getConfigDir()
-		cacheDir := filepath.Join(configDir, "cache")
-		cacheManager = deduplication.NewCacheManager(cacheDir, nil)
-
-		// Initialize deduplicator (简化版 - 仅本地缓存)
-		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
-
-		// Check for duplicates
+	// Check for duplicates
+	if deduplicator != nil {
 		fmt.Printf("  🔍 Checking for duplicates...\n")
 		dupResult, err := deduplicator.CheckDuplicate(parsedReminder)
 		if err != nil {
 			fmt.Printf("  ⚠️ Deduplication check failed: %v\n", err)
 		} else if dupResult.IsDuplicate {
-			fmt.Printf("  🚫 Duplicate detected: %s\n", dupResult.SkipReason)
-			if dupResult.DuplicateType == "cache" {
-				fmt.Printf("    → Skipping (found in local cache)\n")
-				fmt.Println("\n❌ Clip-upload skipped due to duplicate task")
-				fmt.Println("Use --force-upload to override if needed")
-				return
+				fmt.Printf("  🚫 Duplicate detected: %s\n", dupResult.SkipReason)
+				if dupResult.DuplicateType == "cache" {
+					fmt.Printf("    → Skipping (found in local cache)\n")
+					fmt.Println("\n❌ Clip-upload skipped due to duplicate task")
+					fmt.Println("Use --force-upload to override if needed")
+					return
+				}
+			} else {
+				fmt.Printf("  ✅ No duplicates found\n")
 			}
 		} else {
-			fmt.Printf("  ✅ No duplicates found\n")
+			if options.NoDeduplication {
+				fmt.Println("  ⚠️ Deduplication disabled by command line option")
+			} else if options.ForceUpload {
+				fmt.Println("  ⚠️ Deduplication disabled due to force upload")
+			} else {
+				fmt.Println("  ⚠️ Deduplication disabled in configuration")
+			}
 		}
-	} else {
-		if options.NoDeduplication {
-			fmt.Println("  ⚠️ Deduplication disabled by command line option")
-		} else if options.ForceUpload {
-			fmt.Println("  ⚠️ Deduplication disabled due to force upload")
-		} else {
-			fmt.Println("  ⚠️ Deduplication disabled in configuration")
-		}
-	}
 
 	// Send to Microsoft Todo with full details
 	err = todoClient.CreateTaskWithDetails(
@@ -1190,14 +1246,16 @@ func handleClean(options CleanOptions) {
 
 	// 准备清理选项
 	cleanOptions := cleanup.CleanOptions{
-		All:       options.All,
-		Tasks:     options.Tasks,
-		Images:    options.Images,
-		Temp:      options.Temp,
-		Generated: options.Generated,
-		DryRun:    options.DryRun,
-		Force:     options.Force,
-		OlderThan: options.OlderThan,
+		All:         options.All,
+		Tasks:       options.Tasks,
+		Images:      options.Images,
+		ImageHashes: options.ImageHashes,
+		Temp:        options.Temp,
+		Generated:   options.Generated,
+		DryRun:      options.DryRun,
+		Force:       options.Force,
+		OlderThan:   options.OlderThan,
+		ClearAll:    options.ClearAll,
 	}
 
 	// 显示清理信息
@@ -1211,6 +1269,9 @@ func handleClean(options CleanOptions) {
 		if cleanOptions.Images {
 			fmt.Printf("  - 图片处理缓存\n")
 		}
+		if cleanOptions.ImageHashes {
+			fmt.Printf("  - 图片哈希缓存\n")
+		}
 		if cleanOptions.Temp {
 			fmt.Printf("  - 临时文件\n")
 		}
@@ -1223,6 +1284,9 @@ func handleClean(options CleanOptions) {
 	}
 	if cleanOptions.OlderThan != "" {
 		fmt.Printf("  - 仅清理超过 %s 的文件\n", cleanOptions.OlderThan)
+	}
+	if cleanOptions.ClearAll {
+		fmt.Printf("  - 完全清空所有缓存数据\n")
 	}
 
 	// 如果不是预览模式且没有强制标志，询问确认
