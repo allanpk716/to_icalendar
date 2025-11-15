@@ -3,12 +3,12 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/internal/logger"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"gopkg.in/yaml.v3"
 )
@@ -68,10 +68,22 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		return nil, fmt.Errorf("cache configuration validation failed: %w", err)
 	}
 
+	// 设置默认日志配置（如果没有配置的话）
+	if config.Logging.Level == "" {
+		config.Logging.Level = "info"
+	}
+	if !config.Logging.ConsoleOutput && !config.Logging.FileOutput {
+		config.Logging.ConsoleOutput = true
+		config.Logging.FileOutput = true
+	}
+	if config.Logging.LogDir == "" {
+		config.Logging.LogDir = "config"
+	}
+
 	// 添加配置状态日志
-	log.Printf("提醒配置加载完成:")
-	log.Printf("  默认提醒时间: %s", config.Reminder.DefaultRemindBefore)
-	log.Printf("  智能提醒功能: %t", config.Reminder.EnableSmartReminder)
+	logger.Infof("提醒配置加载完成:")
+	logger.Infof("  默认提醒时间: %s", config.Reminder.DefaultRemindBefore)
+	logger.Infof("  智能提醒功能: %t", config.Reminder.EnableSmartReminder)
 
 	return &config, nil
 }
@@ -181,6 +193,12 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 
 	// 缓存配置
 	template.Cache = models.DefaultCacheConfig()
+
+	// 日志配置
+	template.Logging.Level = "info"
+	template.Logging.ConsoleOutput = true
+	template.Logging.FileOutput = true
+	template.Logging.LogDir = "config"
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)

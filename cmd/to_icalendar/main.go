@@ -18,6 +18,7 @@ import (
 	"github.com/allanpk716/to_icalendar/internal/config"
 	"github.com/allanpk716/to_icalendar/internal/deduplication"
 	"github.com/allanpk716/to_icalendar/internal/dify"
+	"github.com/allanpk716/to_icalendar/internal/logger"
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/allanpk716/to_icalendar/internal/processors"
@@ -162,6 +163,17 @@ func parseCleanOptions(args []string) CleanOptions {
 func main() {
 	fmt.Printf("%s v%s - Reminder sending tool (supports Microsoft Todo)\n", appName, version)
 
+	// 初始化日志系统（使用默认配置）
+	logger.Initialize(&models.LoggingConfig{
+		Level:         "info",
+		ConsoleOutput: true,
+		FileOutput:    true,
+		LogDir:        "config",
+	})
+
+	logger.Info("程序启动，版本: %s", version)
+	logger.Debugf("命令行参数: %v", os.Args)
+
 	// 解析命令行参数
 	if len(os.Args) < 2 {
 		showUsage()
@@ -169,6 +181,8 @@ func main() {
 	}
 
 	command := os.Args[1]
+	logger.Infof("执行命令: %s", command)
+
 	switch command {
 	case "init":
 		handleInit()
@@ -189,10 +203,13 @@ func main() {
 	case "help", "-h", "--help":
 		showUsage()
 	default:
+		logger.Errorf("未知命令: %s", command)
 		fmt.Printf("Unknown command: %s\n\n", command)
 		showUsage()
 		os.Exit(1)
 	}
+
+	logger.Info("程序执行完成")
 }
 
 // validateMicrosoftTodoConfig validates Microsoft Todo configuration by checking
@@ -309,16 +326,26 @@ func handleUpload(options CommandOptions) {
 	serverConfigPath := filepath.Join(configDir, serverConfigFile)
 	serverConfig, err := configManager.LoadServerConfig(serverConfigPath)
 	if err != nil {
-		log.Fatalf("Failed to load server configuration: %v", err)
+		logger.Fatalf("加载服务器配置失败: %v", err)
 	}
+
+	// 重新初始化日志系统（使用配置文件中的设置）
+	if err := logger.Initialize(&serverConfig.Logging); err != nil {
+		logger.Errorf("初始化日志系统失败: %v", err)
+		// 继续使用默认配置
+	}
+
+	logger.Info("服务器配置加载成功")
+	logger.Debugf("日志配置: level=%s, console=%t, file=%t",
+		serverConfig.Logging.Level, serverConfig.Logging.ConsoleOutput, serverConfig.Logging.FileOutput)
 
 	// Validate configuration
 	if serverConfig == nil {
-		log.Fatalf("Server configuration is nil")
+		logger.Fatalf("服务器配置为空")
 	}
 
 	if !validateMicrosoftTodoConfig(serverConfig) {
-		log.Fatalf("No valid Microsoft Todo configuration found")
+		logger.Fatalf("无效的 Microsoft Todo 配置")
 	}
 
 	// Load reminders

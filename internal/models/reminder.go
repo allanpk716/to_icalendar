@@ -53,6 +53,14 @@ type DeduplicationConfig struct {
 	EnableRemoteQuery    bool `yaml:"enable_remote_query"`    // 启用远程查询
 }
 
+// LoggingConfig represents the configuration for logging settings.
+type LoggingConfig struct {
+	Level         string `yaml:"level"`           // 日志级别: debug, info, warn, error
+	ConsoleOutput bool   `yaml:"console_output"`  // 是否输出到控制台
+	FileOutput    bool   `yaml:"file_output"`     // 是否输出到文件
+	LogDir        string `yaml:"log_dir"`         // 日志目录（可选，默认 ./Logs/）
+}
+
 // Validate validates the reminder configuration
 func (c *ReminderConfig) Validate() error {
 	// 如果没有设置默认提醒时间，使用默认值
@@ -115,14 +123,15 @@ func (c *ReminderConfig) GetSmartRemindTime(priority Priority) string {
 	}
 }
 
-// ServerConfig contains configuration for Microsoft Todo, Dify integration, reminder settings, and cache management.
-// It includes Azure AD credentials, timezone settings, Dify API configuration, reminder defaults, and cache configuration.
+// ServerConfig contains configuration for Microsoft Todo, Dify integration, reminder settings, cache management, and logging.
+// It includes Azure AD credentials, timezone settings, Dify API configuration, reminder defaults, cache configuration, and logging configuration.
 type ServerConfig struct {
 	MicrosoftTodo  MicrosoftTodoConfig   `yaml:"microsoft_todo"`
 	Reminder       ReminderConfig        `yaml:"reminder"`
 	Deduplication  DeduplicationConfig   `yaml:"deduplication"`
 	Dify           DifyConfig           `yaml:"dify"`
 	Cache          CacheConfig          `yaml:"cache"`
+	Logging        LoggingConfig        `yaml:"logging"`
 }
 
 // ParsedReminder represents a reminder with parsed time information.

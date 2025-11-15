@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/allanpk716/to_icalendar/internal/logger"
 )
 
 // AuthConfig 包含 Microsoft Graph API 认证所需的配置
@@ -155,23 +156,23 @@ func (c *SimpleTodoClient) getAccessToken(ctx context.Context) (string, error) {
 	// 首先尝试从缓存加载token
 	if token, err := c.loadCachedToken(); err == nil && token != nil {
 		if !token.isExpired() {
-			log.Printf("Using cached access token")
+			logger.Debugf("使用缓存的访问令牌")
 			return token.AccessToken, nil
 		}
 
 		// token过期但refresh token有效，尝试刷新
 		if token.RefreshToken != "" {
-			log.Printf("Access token expired, attempting to refresh...")
+			logger.Debugf("访问令牌已过期，尝试刷新...")
 			if newToken, err := c.refreshAccessToken(ctx, token.RefreshToken); err == nil {
-				log.Printf("Token refreshed successfully")
+				logger.Debugf("令牌刷新成功")
 				return newToken, nil
 			}
-			log.Printf("Token refresh failed: %v", err)
+			logger.Warnf("令牌刷新失败: %v", err)
 		}
 	}
 
 	// 如果没有有效token或refresh失败，进行交互式认证
-	log.Printf("No valid cached token found, starting interactive authentication")
+	logger.Infof("未找到有效的缓存令牌，开始交互式认证")
 	return c.getAccessTokenInteractive(ctx)
 }
 
@@ -203,7 +204,7 @@ func (c *SimpleTodoClient) getAccessTokenInteractive(ctx context.Context) (strin
 	}
 
 	// 缓存token以备将来使用
-	log.Printf("Authentication successful, caching token for future use")
+	logger.Infof("认证成功，缓存令牌以备将来使用")
 	// 注意：这里简化处理，实际应该保存完整的token信息
 
 	return accessToken, nil
@@ -269,7 +270,7 @@ func (c *SimpleTodoClient) waitForDeviceCodeCompletion(ctx context.Context, devi
 			return "", fmt.Errorf("device code authentication timed out after %v", time.Since(start))
 		case <-time.After(interval):
 			// 尝试获取token
-			log.Printf("Checking authentication status... (elapsed: %v)", time.Since(start))
+			logger.Debugf("检查认证状态... (已用时间: %v)", time.Since(start))
 			data := url.Values{}
 			data.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 			data.Set("client_id", c.authConfig.ClientID)
@@ -289,7 +290,7 @@ func (c *SimpleTodoClient) waitForDeviceCodeCompletion(ctx context.Context, devi
 
 			if resp.StatusCode == http.StatusOK {
 				// 认证成功，解析token
-				log.Printf("Authentication successful! (elapsed: %v)", time.Since(start))
+				logger.Infof("认证成功！ (已用时间: %v)", time.Since(start))
 				var tokenResp struct {
 					AccessToken string `json:"access_token"`
 					TokenType   string `json:"token_type"`
@@ -301,7 +302,7 @@ func (c *SimpleTodoClient) waitForDeviceCodeCompletion(ctx context.Context, devi
 				}
 			} else if resp.StatusCode != http.StatusBadRequest {
 				resp.Body.Close()
-				log.Printf("Unexpected status code: %d", resp.StatusCode)
+				logger.Warnf("意外的状态码: %d", resp.StatusCode)
 			} else {
 				// 400错误，读取详细错误信息
 				body, _ := io.ReadAll(resp.Body)
@@ -309,9 +310,9 @@ func (c *SimpleTodoClient) waitForDeviceCodeCompletion(ctx context.Context, devi
 				json.Unmarshal(body, &errorResp)
 				resp.Body.Close()
 
-				log.Printf("Still waiting for authentication... (elapsed: %v)", time.Since(start))
+				logger.Infof("Still waiting for authentication... (elapsed: %v)", time.Since(start))
 				if errorResp != nil {
-					log.Printf("Error details: %+v", errorResp)
+					logger.Infof("Error details: %+v", errorResp)
 				}
 			}
 		}
@@ -409,7 +410,7 @@ func (c *SimpleTodoClient) exchangeCodeForTokenWithPKCE(ctx context.Context, cod
 	// 缓存token以备将来使用
 	refreshToken := tokenResp.RefreshToken
 	if err := c.saveCachedToken(tokenResp.AccessToken, refreshToken, tokenResp.ExpiresIn); err != nil {
-		log.Printf("Warning: Failed to cache token: %v", err)
+		logger.Infof("Warning: Failed to cache token: %v", err)
 	}
 
 	return tokenResp.AccessToken, nil
@@ -495,7 +496,7 @@ func (c *SimpleTodoClient) exchangeCodeForToken(ctx context.Context, code string
 	// 缓存token以备将来使用
 	refreshToken := tokenResp.RefreshToken
 	if err := c.saveCachedToken(tokenResp.AccessToken, refreshToken, tokenResp.ExpiresIn); err != nil {
-		log.Printf("Warning: Failed to cache token: %v", err)
+		logger.Infof("Warning: Failed to cache token: %v", err)
 	}
 
 	return tokenResp.AccessToken, nil
@@ -547,7 +548,7 @@ func (c *SimpleTodoClient) makeAPIRequestWithRetry(ctx context.Context, method, 
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			log.Printf("Retrying API request (attempt %d/%d): %s %s", attempt+1, maxRetries, method, endpoint)
+			logger.Infof("Retrying API request (attempt %d/%d): %s %s", attempt+1, maxRetries, method, endpoint)
 			// 指数退避策略
 			backoffDuration := time.Duration(attempt) * time.Second
 			select {
@@ -560,7 +561,7 @@ func (c *SimpleTodoClient) makeAPIRequestWithRetry(ctx context.Context, method, 
 		resp, err := c.makeAPIRequest(ctx, method, endpoint, requestBody)
 		if err != nil {
 			lastErr = err
-			log.Printf("API request failed (attempt %d/%d): %v", attempt+1, maxRetries, err)
+			logger.Infof("API request failed (attempt %d/%d): %v", attempt+1, maxRetries, err)
 			continue
 		}
 
@@ -568,7 +569,7 @@ func (c *SimpleTodoClient) makeAPIRequestWithRetry(ctx context.Context, method, 
 		if resp.StatusCode >= 500 {
 			resp.Body.Close()
 			lastErr = fmt.Errorf("server error with status: %d", resp.StatusCode)
-			log.Printf("Server error (attempt %d/%d): %d", attempt+1, maxRetries, resp.StatusCode)
+			logger.Infof("Server error (attempt %d/%d): %d", attempt+1, maxRetries, resp.StatusCode)
 			continue
 		}
 
@@ -581,7 +582,7 @@ func (c *SimpleTodoClient) makeAPIRequestWithRetry(ctx context.Context, method, 
 
 // TestConnection 测试连接到 Microsoft Graph API
 func (c *SimpleTodoClient) TestConnection() error {
-	log.Printf("Testing Microsoft Graph connection with Tenant ID: %s, Client ID: %s", c.authConfig.TenantID, c.authConfig.ClientID)
+	logger.Infof("Testing Microsoft Graph connection with Tenant ID: %s, Client ID: %s", c.authConfig.TenantID, c.authConfig.ClientID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -613,13 +614,13 @@ func (c *SimpleTodoClient) TestConnection() error {
 		return fmt.Errorf("connected but received invalid user response")
 	}
 
-	log.Printf("Successfully connected to Microsoft Graph API as user: %s", displayName)
+	logger.Infof("Successfully connected to Microsoft Graph API as user: %s", displayName)
 	return nil
 }
 
 // GetOrCreateTaskList 获取或创建任务列表
 func (c *SimpleTodoClient) GetOrCreateTaskList(listName string) (string, error) {
-	log.Printf("Getting or creating task list: %s", listName)
+	logger.Infof("Getting or creating task list: %s", listName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -650,13 +651,13 @@ func (c *SimpleTodoClient) GetOrCreateTaskList(listName string) (string, error) 
 	// 查找是否已存在指定名称的列表
 	for _, list := range response.Value {
 		if list.DisplayName == listName {
-			log.Printf("Found existing task list '%s' with ID: %s", listName, list.ID)
+			logger.Infof("Found existing task list '%s' with ID: %s", listName, list.ID)
 			return list.ID, nil
 		}
 	}
 
 	// 如果没有找到，创建新的任务列表
-	log.Printf("Creating new task list: %s", listName)
+	logger.Infof("Creating new task list: %s", listName)
 
 	newList := map[string]interface{}{
 		"displayName": listName,
@@ -681,21 +682,21 @@ func (c *SimpleTodoClient) GetOrCreateTaskList(listName string) (string, error) 
 		return "", fmt.Errorf("failed to decode created list response: %v", err)
 	}
 
-	log.Printf("Successfully created task list '%s' with ID: %s", listName, createdList.ID)
+	logger.Infof("Successfully created task list '%s' with ID: %s", listName, createdList.ID)
 	return createdList.ID, nil
 }
 
 // CreateTaskWithDetails 创建带详细信息的任务
 func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID string, dueTime, reminderTime time.Time, importance int, timezone string) error {
-	log.Printf("Creating task: %s", title)
+	logger.Infof("Creating task: %s", title)
 	if description != "" {
-		log.Printf("Task description: %s", description)
+		logger.Infof("Task description: %s", description)
 	}
 	if !dueTime.IsZero() {
-		log.Printf("Due time: %s", dueTime.Format("2006-01-02 15:04"))
+		logger.Infof("Due time: %s", dueTime.Format("2006-01-02 15:04"))
 	}
 	if !reminderTime.IsZero() {
-		log.Printf("Reminder time: %s", reminderTime.Format("2006-01-02 15:04"))
+		logger.Infof("Reminder time: %s", reminderTime.Format("2006-01-02 15:04"))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -722,7 +723,7 @@ func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID stri
 			"dateTime": localTime.Format("2006-01-02T15:04:05"),
 			"timeZone": timezone,
 		}
-		log.Printf("Setting due time: %s (timezone: %s)", localTime.Format("2006-01-02 15:04:05"), timezone)
+		logger.Infof("Setting due time: %s (timezone: %s)", localTime.Format("2006-01-02 15:04:05"), timezone)
 	}
 
 	// 设置提醒时间
@@ -772,7 +773,7 @@ func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID stri
 		return fmt.Errorf("failed to decode created task response: %v", err)
 	}
 
-	log.Printf("Successfully created task '%s' with ID: %s", title, createdTask.ID)
+	logger.Infof("Successfully created task '%s' with ID: %s", title, createdTask.ID)
 	return nil
 }
 
@@ -861,7 +862,7 @@ func (c *SimpleTodoClient) saveCachedToken(accessToken, refreshToken string, exp
 		return fmt.Errorf("failed to write cache file: %v", err)
 	}
 
-	log.Printf("Token cached successfully to: %s", cachePath)
+	logger.Infof("Token cached successfully to: %s", cachePath)
 	return nil
 }
 
@@ -912,7 +913,7 @@ func (c *SimpleTodoClient) refreshAccessToken(ctx context.Context, refreshToken 
 	// 如果返回了新的refresh token，更新缓存
 	if tokenResp.RefreshToken != "" {
 		if err := c.saveCachedToken(tokenResp.AccessToken, tokenResp.RefreshToken, tokenResp.ExpiresIn); err != nil {
-			log.Printf("Warning: Failed to cache refreshed token: %v", err)
+			logger.Infof("Warning: Failed to cache refreshed token: %v", err)
 		}
 	}
 
@@ -925,7 +926,7 @@ func (c *SimpleTodoClient) clearCachedToken() error {
 	if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove cache file: %v", err)
 	}
-	log.Printf("Cached token cleared")
+	logger.Infof("Cached token cleared")
 	return nil
 }
 
@@ -950,14 +951,14 @@ func (c *SimpleTodoClient) generateQueryCacheKey(listName, queryType, params str
 
 // QueryIncompleteTasks 查询未完成的任务
 func (c *SimpleTodoClient) QueryIncompleteTasks(listName string) ([]TaskInfo, error) {
-	log.Printf("Querying incomplete tasks in list: %s", listName)
+	logger.Infof("Querying incomplete tasks in list: %s", listName)
 
 	// 生成缓存键
 	cacheKey := c.generateQueryCacheKey(listName, "incomplete", "")
 
 	// 尝试从缓存获取结果
 	if tasks, found := c.queryCache.Get(cacheKey); found {
-		log.Printf("Cache hit for incomplete tasks query: %s (%d tasks)", listName, len(tasks))
+		logger.Infof("Cache hit for incomplete tasks query: %s (%d tasks)", listName, len(tasks))
 		return tasks, nil
 	}
 
@@ -973,7 +974,7 @@ func (c *SimpleTodoClient) QueryIncompleteTasks(listName string) ([]TaskInfo, er
 	// 构建查询参数，获取所有任务，然后在客户端过滤
 	// 简化查询，避免复杂的 OData 过滤语法
 	endpoint := fmt.Sprintf("/me/todo/lists/%s/tasks", listID)
-	log.Printf("Query endpoint: %s", endpoint) // 调试信息
+	logger.Infof("Query endpoint: %s", endpoint) // 调试信息
 
 	resp, err := c.makeAPIRequestWithRetry(ctx, "GET", endpoint, nil, 2)
 	if err != nil {
@@ -985,12 +986,12 @@ func (c *SimpleTodoClient) QueryIncompleteTasks(listName string) ([]TaskInfo, er
 		body, _ := io.ReadAll(resp.Body)
 		var errorResp map[string]interface{}
 		if err := json.Unmarshal(body, &errorResp); err != nil {
-			log.Printf("Failed to unmarshal error response: %v, raw body: %s", err, string(body))
+			logger.Infof("Failed to unmarshal error response: %v, raw body: %s", err, string(body))
 		}
 
 		// 记录详细的错误信息用于调试
-		log.Printf("Query failed with status: %d, endpoint: %s", resp.StatusCode, endpoint)
-		log.Printf("Error response body: %s", string(body))
+		logger.Infof("Query failed with status: %d, endpoint: %s", resp.StatusCode, endpoint)
+		logger.Infof("Error response body: %s", string(body))
 
 		// 检查特定的错误类型
 		if errorResp != nil {
@@ -1060,18 +1061,18 @@ func (c *SimpleTodoClient) QueryIncompleteTasks(listName string) ([]TaskInfo, er
 		}
 	}
 
-	log.Printf("Found %d incomplete tasks in list '%s' (filtered from %d total)", len(tasks), listName, len(response.Value))
+	logger.Infof("Found %d incomplete tasks in list '%s' (filtered from %d total)", len(tasks), listName, len(response.Value))
 
 	// 将结果添加到缓存
 	c.queryCache.Set(cacheKey, tasks)
-	log.Printf("Cached incomplete tasks query result: %s (%d tasks)", listName, len(tasks))
+	logger.Infof("Cached incomplete tasks query result: %s (%d tasks)", listName, len(tasks))
 
 	return tasks, nil
 }
 
 // QueryTasksByTitle 根据标题模糊查询任务
 func (c *SimpleTodoClient) QueryTasksByTitle(listName, titleKeyword string, incompleteOnly bool) ([]TaskInfo, error) {
-	log.Printf("Querying tasks by keyword '%s' in list: %s (incomplete only: %t)", titleKeyword, listName, incompleteOnly)
+	logger.Infof("Querying tasks by keyword '%s' in list: %s (incomplete only: %t)", titleKeyword, listName, incompleteOnly)
 
 	// 生成缓存键
 	incompleteStr := "false"
@@ -1082,7 +1083,7 @@ func (c *SimpleTodoClient) QueryTasksByTitle(listName, titleKeyword string, inco
 
 	// 尝试从缓存获取结果
 	if tasks, found := c.queryCache.Get(cacheKey); found {
-		log.Printf("Cache hit for tasks by title query: %s - %s (%d tasks)", listName, titleKeyword, len(tasks))
+		logger.Infof("Cache hit for tasks by title query: %s - %s (%d tasks)", listName, titleKeyword, len(tasks))
 		return tasks, nil
 	}
 
@@ -1097,7 +1098,7 @@ func (c *SimpleTodoClient) QueryTasksByTitle(listName, titleKeyword string, inco
 
 	// 构建查询参数 - 使用最简单的查询方式
 	endpoint := fmt.Sprintf("/me/todo/lists/%s/tasks", listID)
-	log.Printf("Query endpoint: %s", endpoint) // 调试信息
+	logger.Infof("Query endpoint: %s", endpoint) // 调试信息
 
 	resp, err := c.makeAPIRequestWithRetry(ctx, "GET", endpoint, nil, 2)
 	if err != nil {
@@ -1109,12 +1110,12 @@ func (c *SimpleTodoClient) QueryTasksByTitle(listName, titleKeyword string, inco
 		body, _ := io.ReadAll(resp.Body)
 		var errorResp map[string]interface{}
 		if err := json.Unmarshal(body, &errorResp); err != nil {
-			log.Printf("Failed to unmarshal error response: %v, raw body: %s", err, string(body))
+			logger.Infof("Failed to unmarshal error response: %v, raw body: %s", err, string(body))
 		}
 
 		// 记录详细的错误信息用于调试
-		log.Printf("Query failed with status: %d, endpoint: %s", resp.StatusCode, endpoint)
-		log.Printf("Error response body: %s", string(body))
+		logger.Infof("Query failed with status: %d, endpoint: %s", resp.StatusCode, endpoint)
+		logger.Infof("Error response body: %s", string(body))
 
 		// 检查特定的错误类型
 		if errorResp != nil {
@@ -1200,11 +1201,11 @@ func (c *SimpleTodoClient) QueryTasksByTitle(listName, titleKeyword string, inco
 		}
 	}
 
-	log.Printf("Found %d tasks matching '%s' in list '%s' (filtered from %d total)", len(tasks), titleKeyword, listName, len(response.Value))
+	logger.Infof("Found %d tasks matching '%s' in list '%s' (filtered from %d total)", len(tasks), titleKeyword, listName, len(response.Value))
 
 	// 将结果添加到缓存
 	c.queryCache.Set(cacheKey, tasks)
-	log.Printf("Cached tasks by title query result: %s - %s (%d tasks)", listName, titleKeyword, len(tasks))
+	logger.Infof("Cached tasks by title query result: %s - %s (%d tasks)", listName, titleKeyword, len(tasks))
 
 	return tasks, nil
 }
@@ -1226,7 +1227,7 @@ func (c *SimpleTodoClient) GetQueryCacheStats() map[string]interface{} {
 func (c *SimpleTodoClient) ClearQueryCache() {
 	if c.queryCache != nil {
 		c.queryCache.Clear()
-		log.Printf("Query cache cleared")
+		logger.Infof("Query cache cleared")
 	}
 }
 
