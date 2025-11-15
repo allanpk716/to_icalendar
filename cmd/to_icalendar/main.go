@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/internal/cache"
 	"github.com/allanpk716/to_icalendar/internal/clipboard"
 	"github.com/allanpk716/to_icalendar/internal/cleanup"
 	"github.com/allanpk716/to_icalendar/internal/config"
@@ -55,6 +56,9 @@ type CleanOptions struct {
 	ClearAll     bool
 }
 
+// 全局变量
+var unifiedCacheMgr *cache.UnifiedCacheManager
+
 // getConfigDir 获取配置文件目录路径
 func getConfigDir() (string, error) {
 	// 尝试获取用户主目录
@@ -66,6 +70,193 @@ func getConfigDir() (string, error) {
 
 	configDir := filepath.Join(usr.HomeDir, configDirName)
 	return configDir, nil
+}
+
+// initializeCacheSystem 初始化统一缓存系统
+func initializeCacheSystem() (*cache.UnifiedCacheManager, error) {
+	// 获取配置目录
+	configDir, err := getConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("获取配置目录失败: %w", err)
+	}
+
+	// 创建统一缓存管理器
+	unifiedCacheMgr, err := cache.NewUnifiedCacheManager(filepath.Join(configDir, "cache"), log.Default())
+	if err != nil {
+		return nil, fmt.Errorf("创建统一缓存管理器失败: %w", err)
+	}
+
+	// 检查是否需要迁移
+	if err := performCacheMigration(unifiedCacheMgr); err != nil {
+		log.Printf("缓存迁移失败: %v", err)
+		// 迁移失败不应该阻止程序启动，只记录日志
+	}
+
+	log.Printf("缓存系统初始化完成，缓存目录: %s", unifiedCacheMgr.GetBaseCacheDir())
+	return unifiedCacheMgr, nil
+}
+
+// performCacheMigration 执行缓存迁移
+func performCacheMigration(unifiedCacheMgr *cache.UnifiedCacheManager) error {
+	// 创建迁移管理器
+	migrationMgr := cache.NewMigrationManager(unifiedCacheMgr, log.Default())
+
+	// 检查是否需要迁移
+	if !migrationMgr.HasLegacyCache() {
+		return nil // 无需迁移
+	}
+
+	// 检查是否已经完成迁移
+	if isMigrationCompleted(unifiedCacheMgr.GetBaseCacheDir()) {
+		log.Println("检测到缓存已完成迁移，跳过")
+		return nil
+	}
+
+	log.Println("🚀 检测到旧版缓存，开始自动迁移...")
+
+	// 获取迁移计划
+	plan := migrationMgr.GetMigrationPlan()
+	if !plan.MigrationRequired {
+		return nil
+	}
+
+	log.Printf("📦 发现 %d 个旧版缓存项目，总大小: %.2f MB",
+		len(plan.Migrations), float64(plan.TotalSize)/(1024*1024))
+
+	// 执行迁移
+	options := &cache.MigrationOptions{
+		DryRun:        false,
+		Backup:        false, // 不需要备份，直接迁移
+		DeleteSource:  true,
+		SkipExisting:  true,
+		ForceOverwrite: false,
+	}
+
+	result, err := migrationMgr.ExecuteMigration(plan, options)
+	if err != nil {
+		return fmt.Errorf("执行缓存迁移失败: %w", err)
+	}
+
+	if result.Success {
+		log.Printf("✅ 缓存迁移完成，共迁移 %d 个项目", len(result.Migrated))
+
+		// 标记迁移完成
+		markMigrationCompleted(unifiedCacheMgr.GetBaseCacheDir())
+
+		// 强制清理旧缓存目录
+		forceCleanupLegacyDirs(plan.LegacyPaths)
+
+	} else {
+		log.Printf("⚠️  缓存迁移部分失败，成功: %d, 失败: %d",
+			len(result.Migrated), len(result.Failed))
+	}
+
+	return nil
+}
+
+// isMigrationCompleted 检查是否已经完成迁移
+func isMigrationCompleted(cacheBaseDir string) bool {
+	migrationFile := filepath.Join(cacheBaseDir, ".migration_completed")
+	_, err := os.Stat(migrationFile)
+	return err == nil
+}
+
+// markMigrationCompleted 标记迁移完成
+func markMigrationCompleted(cacheBaseDir string) error {
+	migrationFile := filepath.Join(cacheBaseDir, ".migration_completed")
+	return os.WriteFile(migrationFile, []byte(time.Now().Format(time.RFC3339)), 0644)
+}
+
+// cleanupEmptyLegacyDirs 清理空的旧版缓存目录
+func cleanupEmptyLegacyDirs(legacyPaths *cache.LegacyCachePaths) {
+	if legacyPaths == nil {
+		return
+	}
+
+	// 要清理的目录列表
+	dirsToCheck := []string{
+		legacyPaths.ProgramRootCache,
+		legacyPaths.ImageCache,
+	}
+
+	for _, dir := range dirsToCheck {
+		if dir == "" {
+			continue
+		}
+
+		if isEmpty, err := isDirEmpty(dir); err == nil && isEmpty {
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("清理空目录失败: %s: %v", dir, err)
+			} else {
+				log.Printf("🧹 已清理空目录: %s", dir)
+			}
+		}
+	}
+}
+
+// forceCleanupLegacyDirs 强制清理旧版缓存目录（即使非空）
+func forceCleanupLegacyDirs(legacyPaths *cache.LegacyCachePaths) {
+	if legacyPaths == nil {
+		return
+	}
+
+	// 要强制清理的目录列表
+	dirsToClean := []string{
+		legacyPaths.ProgramRootCache,
+		legacyPaths.ImageCache,
+	}
+
+	for _, dir := range dirsToClean {
+		if dir == "" {
+			continue
+		}
+
+		// 检查目录是否存在
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue // 目录不存在，无需清理
+		}
+
+		// 尝试删除目录
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("⚠️  强制清理目录失败: %s: %v", dir, err)
+		} else {
+			log.Printf("🧹 强制清理旧缓存目录: %s", dir)
+		}
+	}
+
+	// 也清理可能的旧缓存文件
+	oldCacheFiles := []string{
+		"./cache/submitted_tasks.json",
+		"./cache/image_hashes.json",
+	}
+
+	for _, file := range oldCacheFiles {
+		if _, err := os.Stat(file); err == nil {
+			if err := os.Remove(file); err != nil {
+				log.Printf("⚠️  清理旧缓存文件失败: %s: %v", file, err)
+			} else {
+				log.Printf("🧹 已清理旧缓存文件: %s", file)
+			}
+		}
+	}
+}
+
+// isDirEmpty 检查目录是否为空
+func isDirEmpty(dirPath string) (bool, error) {
+	file, err := os.Open(dirPath)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	_, err = file.Readdirnames(1)
+	if err == nil {
+		return false, nil // 目录不为空
+	}
+	if err.Error() == "EOF" {
+		return true, nil // 目录为空
+	}
+	return false, err // 其他错误
 }
 
 // ensureConfigDir 确保配置目录存在
@@ -173,6 +364,14 @@ func main() {
 
 	logger.Info("程序启动，版本: %s", version)
 	logger.Debugf("命令行参数: %v", os.Args)
+
+	// 初始化统一缓存系统（所有命令都需要的初始化）
+	var err error
+	unifiedCacheMgr, err = initializeCacheSystem()
+	if err != nil {
+		logger.Errorf("缓存系统初始化失败: %v", err)
+		// 缓存初始化失败不应该阻止程序运行，只记录错误
+	}
 
 	// 解析命令行参数
 	if len(os.Args) < 2 {
@@ -419,6 +618,7 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 	// Initialize deduplication service
 	var deduplicator *deduplication.Deduplicator
 	var cacheManager *deduplication.CacheManager
+	var unifiedCacheMgr *cache.UnifiedCacheManager
 
 	// Apply command line options to configuration
 	dedupConfig := serverConfig.Deduplication
@@ -440,16 +640,26 @@ func handleMicrosoftTodoUpload(serverConfig *models.ServerConfig, reminders []*m
 	if dedupConfig.Enabled {
 		fmt.Println("✓ Deduplication enabled")
 
-		// Initialize cache manager
-		configDir, _ := getConfigDir()
-		cacheDir := filepath.Join(configDir, "cache")
-		cacheManager = deduplication.NewCacheManager(cacheDir, nil)
+		// Use the already initialized unified cache manager from main()
+		if unifiedCacheMgr == nil {
+			// 如果主函数初始化失败，创建一个新的
+			configDir, _ := getConfigDir()
+			var err error
+			unifiedCacheMgr, err = cache.NewUnifiedCacheManager(filepath.Join(configDir, "cache"), log.Default())
+			if err != nil {
+				log.Fatalf("创建统一缓存管理器失败: %v", err)
+			}
+		}
+
+		// Initialize cache manager with unified cache
+		cacheManager = deduplication.NewCacheManager(unifiedCacheMgr.GetBaseCacheDir(), log.Default())
 
 		// Initialize deduplicator (简化版 - 仅本地缓存)
 		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
 
 		fmt.Printf("  - Local cache: %t\n", dedupConfig.EnableLocalCache)
 		fmt.Printf("  - Remote query: 已禁用\n")
+		fmt.Printf("  - 缓存目录: %s\n", unifiedCacheMgr.GetBaseCacheDir())
 	} else {
 		if options.NoDeduplication {
 			fmt.Println("  ⚠️ Deduplication disabled by command line option")

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/allanpk716/to_icalendar/internal/cache"
 	"github.com/sirupsen/logrus"
 )
 
@@ -158,9 +159,10 @@ func (c *ImageProcessingConfig) EnsureDebugDir() error {
 
 // ConfigManager 配置管理器
 type ConfigManager struct {
-	config *ImageProcessingConfig
-	logger *logrus.Logger
-	configDir string
+	config            *ImageProcessingConfig
+	logger            *logrus.Logger
+	configDir         string
+	unifiedCacheMgr   *cache.UnifiedCacheManager // 统一缓存管理器
 }
 
 // NewConfigManager 创建配置管理器
@@ -171,6 +173,23 @@ func NewConfigManager(configDir string, logger *logrus.Logger) *ConfigManager {
 	}
 }
 
+// NewConfigManagerWithUnifiedCache 创建带有统一缓存管理器的配置管理器
+func NewConfigManagerWithUnifiedCache(configDir string, logger *logrus.Logger) (*ConfigManager, error) {
+	// 创建统一缓存管理器
+	unifiedCacheMgr, err := cache.NewUnifiedCacheManager("", nil) // 使用默认缓存目录
+	if err != nil {
+		return nil, fmt.Errorf("创建统一缓存管理器失败: %w", err)
+	}
+
+	cm := &ConfigManager{
+		configDir:       configDir,
+		logger:          logger,
+		unifiedCacheMgr: unifiedCacheMgr,
+	}
+
+	return cm, nil
+}
+
 // LoadConfig 加载配置
 func (cm *ConfigManager) LoadConfig() error {
 	config, err := LoadOrCreateConfig(cm.configDir, cm.logger)
@@ -179,6 +198,12 @@ func (cm *ConfigManager) LoadConfig() error {
 	}
 
 	cm.config = config
+
+	// 如果有统一缓存管理器，更新缓存目录配置
+	if cm.unifiedCacheMgr != nil {
+		cm.config.CacheDir = cm.unifiedCacheMgr.GetCacheDir(cache.CacheTypeImages)
+		cm.logger.Infof("使用统一缓存管理器，图片缓存目录: %s", cm.config.CacheDir)
+	}
 
 	// 确保调试目录存在
 	if err := cm.config.EnsureDebugDir(); err != nil {
@@ -313,7 +338,24 @@ func (cm *ConfigManager) cleanupCache() {
 
 // GetCacheDir 获取缓存目录
 func (cm *ConfigManager) GetCacheDir() string {
+	if cm.unifiedCacheMgr != nil {
+		return cm.unifiedCacheMgr.GetCacheDir(cache.CacheTypeImages)
+	}
 	return cm.config.CacheDir
+}
+
+// GetUnifiedCacheManager 获取统一缓存管理器
+func (cm *ConfigManager) GetUnifiedCacheManager() *cache.UnifiedCacheManager {
+	return cm.unifiedCacheMgr
+}
+
+// SetUnifiedCacheManager 设置统一缓存管理器
+func (cm *ConfigManager) SetUnifiedCacheManager(ucm *cache.UnifiedCacheManager) {
+	cm.unifiedCacheMgr = ucm
+	if cm.config != nil && ucm != nil {
+		cm.config.CacheDir = ucm.GetCacheDir(cache.CacheTypeImages)
+		cm.logger.Infof("更新图片缓存目录: %s", cm.config.CacheDir)
+	}
 }
 
 // IsCacheEnabled 检查是否启用了缓存
