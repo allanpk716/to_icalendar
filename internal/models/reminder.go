@@ -115,13 +115,14 @@ func (c *ReminderConfig) GetSmartRemindTime(priority Priority) string {
 	}
 }
 
-// ServerConfig contains configuration for Microsoft Todo, Dify integration, and reminder settings.
-// It includes Azure AD credentials, timezone settings, Dify API configuration, and reminder defaults.
+// ServerConfig contains configuration for Microsoft Todo, Dify integration, reminder settings, and cache management.
+// It includes Azure AD credentials, timezone settings, Dify API configuration, reminder defaults, and cache configuration.
 type ServerConfig struct {
 	MicrosoftTodo  MicrosoftTodoConfig   `yaml:"microsoft_todo"`
 	Reminder       ReminderConfig        `yaml:"reminder"`
 	Deduplication  DeduplicationConfig   `yaml:"deduplication"`
 	Dify           DifyConfig           `yaml:"dify"`
+	Cache          CacheConfig          `yaml:"cache"`
 }
 
 // ParsedReminder represents a reminder with parsed time information.

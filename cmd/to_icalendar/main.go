@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +21,7 @@ import (
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/allanpk716/to_icalendar/internal/processors"
+	"github.com/allanpk716/to_icalendar/internal/task"
 )
 
 const (
@@ -179,6 +182,10 @@ func main() {
 		handleClipUpload(parseCommandOptions(os.Args[2:]))
 	case "clean":
 		handleClean(parseCleanOptions(os.Args[2:]))
+	case "tasks":
+		handleTasks(os.Args[2:])
+	case "cache":
+		handleCache(os.Args[2:])
 	case "help", "-h", "--help":
 		showUsage()
 	default:
@@ -629,8 +636,7 @@ func testMicrosoftTodoConnection(serverConfig *models.ServerConfig) {
 // showUsage displays the usage information and command examples.
 // It prints the help message with all available commands and their usage.
 func showUsage() {
-	fmt.Printf(`
-Usage:
+	fmt.Printf(`Usage:
   %s <command> [options]
 
 Commands:
@@ -640,6 +646,8 @@ Commands:
   clip                    Process clipboard content (image or text) and generate JSON
   clip-upload             Process clipboard content and directly upload to Microsoft Todo
   clean                   Clean cache files
+  tasks                   Task management commands (list, show, clean)
+  cache                   Cache management commands (stats, cleanup)
   help                    Show this help message
 
 Options:
@@ -675,6 +683,11 @@ Examples:
   %s clean --image-hashes --force                 # Force clean image hash cache
   %s clean --older-than 7d                         # Clean files older than 7 days
   %s clean --clear-all --force                     # Completely clear all cache data
+  %s tasks list                                    # List recent tasks
+  %s tasks show <task-id>                         # Show task details
+  %s tasks clean <task-id>                        # Clean specific task
+  %s cache stats                                   # Show cache statistics
+  %s cache cleanup 30                              # Clean cache older than 30 days
 
 Configuration files:
   ~/.to_icalendar/server.yaml       Service configuration (Microsoft Todo & Dify)
@@ -703,7 +716,7 @@ Instructions:
   6. Run 'to_icalendar clip-upload' to process clipboard and directly upload to Microsoft Todo
 
 For more information, see README.md
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName)
 }
 
 // handleClip processes clipboard content (image or text) using Dify API
@@ -932,6 +945,32 @@ func handleClipUpload(options CommandOptions) {
 
 	fmt.Println("✓ Configuration loaded successfully")
 
+	// Initialize task manager and perform auto cleanup
+	taskManager, err := task.NewTaskManager(configDir, serverConfig.Cache, log.Default())
+	if err != nil {
+		log.Fatalf("Failed to initialize task manager: %v", err)
+	}
+
+	// Perform automatic cleanup if enabled
+	if serverConfig.Cache.CleanupOnStartup {
+		fmt.Println("🧹 Performing automatic cache cleanup...")
+		taskCleaner := task.NewTaskCleaner(taskManager, log.Default())
+		cleanupResult, err := taskCleaner.AutoCleanup()
+		if err != nil {
+			log.Printf("Warning: Automatic cleanup failed: %v", err)
+		} else if !cleanupResult.Skipped {
+			fmt.Printf("✓ Cleanup completed: removed %d tasks, freed %.2f MB\n",
+				cleanupResult.TasksCleaned, float64(cleanupResult.BytesFreed)/(1024*1024))
+		}
+	}
+
+	// Create new task session for this upload
+	taskSession, err := taskManager.CreateTaskSession()
+	if err != nil {
+		log.Fatalf("Failed to create task session: %v", err)
+	}
+	fmt.Printf("📝 Created task session: %s\n", taskSession.TaskID)
+
 	// Initialize clipboard manager
 	clipboardManager, err := clipboard.NewManager()
 	if err != nil {
@@ -1001,8 +1040,19 @@ func handleClipUpload(options CommandOptions) {
 		fmt.Println("Processing image from clipboard...")
 		imageData, err := clipboardManager.ReadImage()
 		if err != nil {
+			// Update task session with error
+			taskManager.UpdateTaskStatus(taskSession, task.TaskStatusFailed, fmt.Sprintf("Failed to read image from clipboard: %v", err))
 			log.Fatalf("Failed to read image from clipboard: %v", err)
 		}
+
+		// Save original clipboard image to task session
+		if err := taskManager.SaveFileToTask(taskSession, task.FileTypeClipboardOriginal, imageData); err != nil {
+			log.Printf("Warning: Failed to save original image to task session: %v", err)
+		}
+
+		// Generate and set image hash in task session
+		imageHash := generateImageHash(imageData)
+		taskManager.SetImageHash(taskSession, imageHash)
 
 		// Initialize Dify client and processor
 		difyClient := dify.NewDifyClient(&serverConfig.Dify)
@@ -1344,4 +1394,206 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// generateImageHash 生成图片数据的SHA256哈希
+func generateImageHash(imageData []byte) string {
+	hash := sha256.Sum256(imageData)
+	return hex.EncodeToString(hash[:])
+}
+
+// handleTasks 处理任务管理命令
+func handleTasks(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: to_icalendar tasks <command>")
+		fmt.Println("Commands:")
+		fmt.Println("  list [limit]     - List recent tasks")
+		fmt.Println("  show <task-id>   - Show task details")
+		fmt.Println("  clean <task-id>  - Clean specific task")
+		return
+	}
+
+	command := args[0]
+	configDir, err := getConfigDir()
+	if err != nil {
+		log.Fatalf("Failed to get config directory: %v", err)
+	}
+
+	// Load configuration
+	configManager := config.NewConfigManager()
+	serverConfigPath := filepath.Join(configDir, serverConfigFile)
+	serverConfig, err := configManager.LoadServerConfig(serverConfigPath)
+	if err != nil {
+		log.Fatalf("Failed to load server configuration: %v", err)
+	}
+
+	// Create task manager
+	taskManager, err := task.NewTaskManager(configDir, serverConfig.Cache, log.Default())
+	if err != nil {
+		log.Fatalf("Failed to create task manager: %v", err)
+	}
+
+	switch command {
+	case "list":
+		limit := 10 // default limit
+		if len(args) > 1 {
+			if l, err := fmt.Sscanf(args[1], "%d", &limit); err != nil || l != 1 {
+				log.Fatalf("Invalid limit: %s", args[1])
+			}
+		}
+
+		tasks, err := taskManager.GetRecentTasks(limit)
+		if err != nil {
+			log.Fatalf("Failed to get recent tasks: %v", err)
+		}
+
+		if len(tasks) == 0 {
+			fmt.Println("No tasks found")
+			return
+		}
+
+		fmt.Printf("Recent %d tasks:\n", len(tasks))
+		fmt.Println("=====================================")
+		for _, taskItem := range tasks {
+			status := "✓"
+			if taskItem.Status != task.TaskStatusSuccess {
+				status = "✗"
+			}
+			fmt.Printf("%s %s - %s (%s)\n", taskItem.TaskID[:8], taskItem.Title, status, taskItem.StartTime.Format("2006-01-02 15:04:05"))
+		}
+
+	case "show":
+		if len(args) < 2 {
+			log.Fatalf("Task ID is required")
+		}
+		taskID := args[1]
+
+		session, err := taskManager.GetTaskSession(taskID)
+		if err != nil {
+			log.Fatalf("Failed to get task session: %v", err)
+		}
+
+		fmt.Printf("Task Details: %s\n", session.TaskID)
+		fmt.Println("=====================================")
+		fmt.Printf("Status: %s\n", session.Status)
+		fmt.Printf("Start Time: %s\n", session.StartTime.Format("2006-01-02 15:04:05"))
+		if !session.EndTime.IsZero() {
+			fmt.Printf("End Time: %s\n", session.EndTime.Format("2006-01-02 15:04:05"))
+		}
+		if session.Title != "" {
+			fmt.Printf("Title: %s\n", session.Title)
+		}
+		if session.ImageHash != "" {
+			fmt.Printf("Image Hash: %s\n", session.ImageHash[:16])
+		}
+		fmt.Printf("Dify Success: %t\n", session.DifySuccess)
+		fmt.Printf("Todo Success: %t\n", session.TodoSuccess)
+		if session.ErrorMessage != "" {
+			fmt.Printf("Error: %s\n", session.ErrorMessage)
+		}
+		fmt.Printf("Files: %d\n", len(session.Files))
+
+	case "clean":
+		if len(args) < 2 {
+			log.Fatalf("Task ID is required")
+		}
+		taskID := args[1]
+
+		session, err := taskManager.GetTaskSession(taskID)
+		if err != nil {
+			log.Fatalf("Failed to get task session: %v", err)
+		}
+
+		// Remove task directory
+		if err := os.RemoveAll(session.TaskDir); err != nil {
+			log.Fatalf("Failed to remove task directory: %v", err)
+		}
+
+		fmt.Printf("Task %s cleaned successfully\n", taskID)
+
+	default:
+		fmt.Printf("Unknown tasks command: %s\n", command)
+	}
+}
+
+// handleCache 处理缓存管理命令
+func handleCache(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: to_icalendar cache <command>")
+		fmt.Println("Commands:")
+		fmt.Println("  stats            - Show cache statistics")
+		fmt.Println("  cleanup [days]   - Manually cleanup cache")
+		return
+	}
+
+	command := args[0]
+	configDir, err := getConfigDir()
+	if err != nil {
+		log.Fatalf("Failed to get config directory: %v", err)
+	}
+
+	// Load configuration
+	configManager := config.NewConfigManager()
+	serverConfigPath := filepath.Join(configDir, serverConfigFile)
+	serverConfig, err := configManager.LoadServerConfig(serverConfigPath)
+	if err != nil {
+		log.Fatalf("Failed to load server configuration: %v", err)
+	}
+
+	// Create task manager
+	taskManager, err := task.NewTaskManager(configDir, serverConfig.Cache, log.Default())
+	if err != nil {
+		log.Fatalf("Failed to create task manager: %v", err)
+	}
+
+	// Create cleaner
+	cleaner := task.NewTaskCleaner(taskManager, log.Default())
+
+	switch command {
+	case "stats":
+		stats, err := cleaner.CleanupStatistics()
+		if err != nil {
+			log.Fatalf("Failed to get cache statistics: %v", err)
+		}
+
+		fmt.Println("Cache Statistics")
+		fmt.Println("==================")
+		fmt.Printf("Total Tasks: %d\n", stats.TaskCount)
+		fmt.Printf("Recent Tasks (7 days): %d\n", stats.RecentTasks7Days)
+		fmt.Printf("Recent Tasks (30 days): %d\n", stats.RecentTasks30Days)
+		fmt.Printf("Total Size: %.2f MB\n", stats.GetSizeMB())
+		fmt.Printf("Cache Files: %d\n", stats.CacheFiles)
+		fmt.Printf("Cache Size: %.2f MB\n", stats.GetCacheSizeMB())
+
+	case "cleanup":
+		days := 30 // default
+		if len(args) > 1 {
+			if d, err := fmt.Sscanf(args[1], "%d", &days); err != nil || d != 1 {
+				log.Fatalf("Invalid days: %s", args[1])
+			}
+		}
+
+		fmt.Printf("Cleaning cache older than %d days...\n", days)
+		result, err := cleaner.CleanupOlderThan(days)
+		if err != nil {
+			log.Fatalf("Failed to cleanup cache: %v", err)
+		}
+
+		if result.Skipped {
+			fmt.Printf("Cleanup skipped: %s\n", result.Reason)
+			return
+		}
+
+		fmt.Printf("Cleanup completed:\n")
+		fmt.Printf("  Tasks cleaned: %d\n", result.TasksCleaned)
+		fmt.Printf("  Space freed: %.2f MB\n", float64(result.BytesFreed)/(1024*1024))
+		fmt.Printf("  Cache entries removed: %d\n", result.CacheEntriesRemoved)
+		fmt.Printf("  Orphaned files cleaned: %d\n", result.OrphanedFilesCleaned)
+		if len(result.Errors) > 0 {
+			fmt.Printf("  Errors: %d\n", len(result.Errors))
+		}
+
+	default:
+		fmt.Printf("Unknown cache command: %s\n", command)
+	}
 }

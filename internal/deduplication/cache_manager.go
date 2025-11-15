@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/models"
+	"github.com/allanpk716/to_icalendar/internal/task"
 )
 
 // TaskCache 记录已提交任务的缓存结构
@@ -48,6 +49,7 @@ type CacheManager struct {
 	mutex          sync.RWMutex
 	logger         *log.Logger
 	cleanupTTL     time.Duration
+	taskManager    *task.TaskManager  // 新增：集成TaskManager
 }
 
 // NewCacheManager 创建新的缓存管理器
@@ -64,6 +66,40 @@ func NewCacheManager(cacheDir string, logger *log.Logger) *CacheManager {
 		cachedImages:   make(map[string]*ImageHashCache),
 		logger:         logger,
 		cleanupTTL:     30 * 24 * time.Hour, // 30天过期
+	}
+
+	// 确保缓存目录存在
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		cm.logger.Printf("创建缓存目录失败: %v", err)
+	}
+
+	// 加载现有缓存
+	if err := cm.loadCache(); err != nil {
+		cm.logger.Printf("加载任务缓存失败: %v", err)
+	}
+
+	if err := cm.loadImageCache(); err != nil {
+		cm.logger.Printf("加载图片缓存失败: %v", err)
+	}
+
+	return cm
+}
+
+// NewCacheManagerWithTaskManager 创建与TaskManager集成的缓存管理器
+func NewCacheManagerWithTaskManager(cacheDir string, taskManager *task.TaskManager, logger *log.Logger) *CacheManager {
+	if logger == nil {
+		logger = log.Default()
+	}
+
+	cm := &CacheManager{
+		cacheDir:       cacheDir,
+		cacheFile:      filepath.Join(cacheDir, "submitted_tasks.json"),
+		imageCacheFile: filepath.Join(cacheDir, "image_hashes.json"),
+		cachedTasks:    make(map[string]*TaskCache),
+		cachedImages:   make(map[string]*ImageHashCache),
+		logger:         logger,
+		cleanupTTL:     30 * 24 * time.Hour, // 30天过期
+		taskManager:    taskManager,
 	}
 
 	// 确保缓存目录存在

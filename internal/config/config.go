@@ -63,6 +63,11 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		return nil, fmt.Errorf("deduplication configuration validation failed: %w", err)
 	}
 
+	// 验证缓存配置
+	if err := config.Cache.Validate(); err != nil {
+		return nil, fmt.Errorf("cache configuration validation failed: %w", err)
+	}
+
 	// 添加配置状态日志
 	log.Printf("提醒配置加载完成:")
 	log.Printf("  默认提醒时间: %s", config.Reminder.DefaultRemindBefore)
@@ -173,6 +178,9 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	template.Deduplication.CheckIncompleteOnly = true
 	template.Deduplication.EnableLocalCache = true
 	template.Deduplication.EnableRemoteQuery = true
+
+	// 缓存配置
+	template.Cache = models.DefaultCacheConfig()
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)
