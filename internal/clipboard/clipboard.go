@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg" // Support JPEG decoding
 	"math"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
@@ -177,7 +178,12 @@ func NewClipboardReaderWithUnifiedCache(unifiedCacheMgr *cache.UnifiedCacheManag
 
 	// 如果统一缓存管理器初始化失败，使用默认方式
 	if configManager == nil {
-		configManager = image.NewConfigManager(".", logger.GetLogger())
+		// 使用用户配置目录作为默认值
+		if usr, err := user.Current(); err == nil {
+			configManager = image.NewConfigManager(filepath.Join(usr.HomeDir, ".to_icalendar"), logger.GetLogger())
+		} else {
+			configManager = image.NewConfigManager(".", logger.GetLogger())
+		}
 		if err := configManager.LoadConfig(); err != nil {
 			logger.Warnf("加载图片处理配置失败: %v", err)
 		}
@@ -217,7 +223,12 @@ func NewClipboardReaderWithNormalizerAndUnifiedCache(normalizer *image.ImageNorm
 
 	// 如果统一缓存管理器初始化失败，使用默认方式
 	if configManager == nil {
-		configManager = image.NewConfigManager(".", logger.GetLogger())
+		// 使用用户配置目录作为默认值
+		if usr, err := user.Current(); err == nil {
+			configManager = image.NewConfigManager(filepath.Join(usr.HomeDir, ".to_icalendar"), logger.GetLogger())
+		} else {
+			configManager = image.NewConfigManager(".", logger.GetLogger())
+		}
 		if err := configManager.LoadConfig(); err != nil {
 			logger.Warnf("加载图片处理配置失败: %v", err)
 		}

@@ -359,7 +359,7 @@ func main() {
 		Level:         "info",
 		ConsoleOutput: true,
 		FileOutput:    true,
-		LogDir:        "config",
+		LogDir:        "./Logs",
 	})
 
 	logger.Info("程序启动，版本: %s", version)

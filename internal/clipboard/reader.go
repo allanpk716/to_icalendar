@@ -1,6 +1,7 @@
 package clipboard
 
 import (
+	"github.com/allanpk716/to_icalendar/internal/cache"
 	"github.com/allanpk716/to_icalendar/internal/models"
 )
 
@@ -35,6 +36,18 @@ type Manager struct {
 // NewManager creates a new clipboard manager
 func NewManager() (*Manager, error) {
 	reader, err := NewClipboardReader()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Manager{
+		reader: reader,
+	}, nil
+}
+
+// NewManagerWithUnifiedCache creates a new clipboard manager with unified cache manager
+func NewManagerWithUnifiedCache(unifiedCacheMgr *cache.UnifiedCacheManager) (*Manager, error) {
+	reader, err := NewClipboardReaderWithUnifiedCache(unifiedCacheMgr)
 	if err != nil {
 		return nil, err
 	}

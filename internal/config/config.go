@@ -77,7 +77,7 @@ func (cm *ConfigManager) LoadServerConfig(configPath string) (*models.ServerConf
 		config.Logging.FileOutput = true
 	}
 	if config.Logging.LogDir == "" {
-		config.Logging.LogDir = "config"
+		config.Logging.LogDir = "./Logs"
 	}
 
 	// 添加配置状态日志
@@ -198,7 +198,7 @@ func (cm *ConfigManager) CreateServerConfigTemplate(configPath string) error {
 	template.Logging.Level = "info"
 	template.Logging.ConsoleOutput = true
 	template.Logging.FileOutput = true
-	template.Logging.LogDir = "config"
+	template.Logging.LogDir = "./Logs"
 
 	// 序列化为YAML
 	data, err := yaml.Marshal(template)

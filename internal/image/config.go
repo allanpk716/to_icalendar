@@ -3,6 +3,7 @@ package image
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -175,8 +176,11 @@ func NewConfigManager(configDir string, logger *logrus.Logger) *ConfigManager {
 
 // NewConfigManagerWithUnifiedCache 创建带有统一缓存管理器的配置管理器
 func NewConfigManagerWithUnifiedCache(configDir string, logger *logrus.Logger) (*ConfigManager, error) {
+	// 构建缓存目录路径
+	cacheDir := filepath.Join(configDir, "cache")
+
 	// 创建统一缓存管理器
-	unifiedCacheMgr, err := cache.NewUnifiedCacheManager("", nil) // 使用默认缓存目录
+	unifiedCacheMgr, err := cache.NewUnifiedCacheManager(cacheDir, log.Default())
 	if err != nil {
 		return nil, fmt.Errorf("创建统一缓存管理器失败: %w", err)
 	}
