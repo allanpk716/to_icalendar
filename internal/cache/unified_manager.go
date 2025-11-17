@@ -242,8 +242,8 @@ func getDefaultCacheDir() string {
 		return filepath.Join(usr.HomeDir, ".to_icalendar", "cache")
 	}
 
-	// 备用方案：使用当前目录
-	return filepath.Join(".", "cache")
+	// 备用方案：使用系统临时目录
+	return filepath.Join(os.TempDir(), "to_icalendar_cache")
 }
 
 // calculateDirSize 计算目录大小和文件数量

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/allanpk716/to_icalendar/internal/cache"
 	"github.com/allanpk716/to_icalendar/internal/image"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/atotto/clipboard"
@@ -149,15 +150,37 @@ type WindowsClipboardReader struct {
 
 // NewClipboardReader creates a new clipboard reader based on the platform
 func NewClipboardReader() (Reader, error) {
+	return NewClipboardReaderWithUnifiedCache(nil)
+}
+
+// NewClipboardReaderWithUnifiedCache creates a new clipboard reader with unified cache manager
+func NewClipboardReaderWithUnifiedCache(unifiedCacheMgr *cache.UnifiedCacheManager) (Reader, error) {
 	// 初始化logger
 	settings := logger.NewSettings()
 	settings.LogNameBase = "ClipboardReader"
 	settings.Level = logger.GetLogger().Level // 保持当前级别
 	logger.SetLoggerSettings(settings)
 
-	configManager := image.NewConfigManager(".", logger.GetLogger())
-	if err := configManager.LoadConfig(); err != nil {
-		logger.Warnf("加载图片处理配置失败: %v", err)
+	var configManager *image.ConfigManager
+	var err error
+
+	// 尝试使用统一缓存管理器
+	if unifiedCacheMgr != nil {
+		configManager, err = image.NewConfigManagerWithUnifiedCache(".", logger.GetLogger())
+		if err == nil {
+			configManager.SetUnifiedCacheManager(unifiedCacheMgr)
+			logger.Infof("使用统一缓存管理器初始化剪贴板处理器")
+		} else {
+			logger.Warnf("创建带统一缓存的配置管理器失败: %v", err)
+		}
+	}
+
+	// 如果统一缓存管理器初始化失败，使用默认方式
+	if configManager == nil {
+		configManager = image.NewConfigManager(".", logger.GetLogger())
+		if err := configManager.LoadConfig(); err != nil {
+			logger.Warnf("加载图片处理配置失败: %v", err)
+		}
 	}
 
 	return &WindowsClipboardReader{
@@ -167,15 +190,37 @@ func NewClipboardReader() (Reader, error) {
 
 // NewClipboardReaderWithNormalizer creates a new clipboard reader with image normalizer
 func NewClipboardReaderWithNormalizer(normalizer *image.ImageNormalizer) (Reader, error) {
+	return NewClipboardReaderWithNormalizerAndUnifiedCache(normalizer, nil)
+}
+
+// NewClipboardReaderWithNormalizerAndUnifiedCache creates a new clipboard reader with image normalizer and unified cache
+func NewClipboardReaderWithNormalizerAndUnifiedCache(normalizer *image.ImageNormalizer, unifiedCacheMgr *cache.UnifiedCacheManager) (Reader, error) {
 	// 初始化logger
 	settings := logger.NewSettings()
 	settings.LogNameBase = "ClipboardReader"
 	settings.Level = logger.GetLogger().Level // 保持当前级别
 	logger.SetLoggerSettings(settings)
 
-	configManager := image.NewConfigManager(".", logger.GetLogger())
-	if err := configManager.LoadConfig(); err != nil {
-		logger.Warnf("加载图片处理配置失败: %v", err)
+	var configManager *image.ConfigManager
+	var err error
+
+	// 尝试使用统一缓存管理器
+	if unifiedCacheMgr != nil {
+		configManager, err = image.NewConfigManagerWithUnifiedCache(".", logger.GetLogger())
+		if err == nil {
+			configManager.SetUnifiedCacheManager(unifiedCacheMgr)
+			logger.Infof("使用统一缓存管理器初始化剪贴板处理器")
+		} else {
+			logger.Warnf("创建带统一缓存的配置管理器失败: %v", err)
+		}
+	}
+
+	// 如果统一缓存管理器初始化失败，使用默认方式
+	if configManager == nil {
+		configManager = image.NewConfigManager(".", logger.GetLogger())
+		if err := configManager.LoadConfig(); err != nil {
+			logger.Warnf("加载图片处理配置失败: %v", err)
+		}
 	}
 
 	return &WindowsClipboardReader{

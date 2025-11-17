@@ -1270,12 +1270,14 @@ func handleClipUpload(options CommandOptions) {
 	}
 
 	var processingResult *models.ProcessingResult
+	var imageData []byte // Declare imageData outside switch to make it accessible later
+	var imageProcessor *processors.ImageProcessor // Declare imageProcessor outside switch to make it accessible later
 
 	// Process based on content type
 	switch contentType {
 	case models.ContentTypeImage:
 		fmt.Println("Processing image from clipboard...")
-		imageData, err := clipboardManager.ReadImage()
+		imageData, err = clipboardManager.ReadImage()
 		if err != nil {
 			// Update task session with error
 			taskManager.UpdateTaskStatus(taskSession, task.TaskStatusFailed, fmt.Sprintf("Failed to read image from clipboard: %v", err))
@@ -1301,13 +1303,14 @@ func handleClipUpload(options CommandOptions) {
 		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", processingOptions)
 
 		// Initialize image processor with deduplication
-		imageProcessor, err := processors.NewImageProcessorWithDeduplication(difyProcessor, deduplicator)
+		imageProcessor, err = processors.NewImageProcessorWithDeduplication(difyProcessor, deduplicator)
 		if err != nil {
 			log.Fatalf("Failed to create image processor with deduplication: %v", err)
 		}
 		defer imageProcessor.Cleanup()
 
-		result, err := imageProcessor.ProcessClipboardImage(ctx, imageData)
+		// Process image without recording cache initially
+		result, err := imageProcessor.ProcessClipboardImageWithCacheControl(ctx, imageData, false)
 		if err != nil {
 			log.Fatalf("Failed to process clipboard image: %v", err)
 		}
@@ -1392,7 +1395,38 @@ func handleClipUpload(options CommandOptions) {
 	fmt.Println("Testing Microsoft Graph connection...")
 	err = todoClient.TestConnection()
 	if err != nil {
-		log.Fatalf("Microsoft Graph connection test failed: %v", err)
+		// Handle connection test failure gracefully
+		fmt.Printf("\n❌ Microsoft Graph connection test failed: %v\n", err)
+
+		// Provide specific guidance based on error type
+		if strings.Contains(err.Error(), "authentication") || strings.Contains(err.Error(), "unauthorized") {
+			fmt.Println("\n🔧 Authentication Error Detected:")
+			fmt.Println("  Please check your Microsoft Todo configuration in config/server.yaml:")
+			fmt.Println("  - tenant_id")
+			fmt.Println("  - client_id")
+			fmt.Println("  - client_secret")
+			fmt.Println("  - user_email")
+			fmt.Println("\n💡 You can test your configuration with: ./to_icalendar test")
+			fmt.Println("   Or run: ./to_icalendar test-microsoft-todo")
+		} else if strings.Contains(err.Error(), "connection") || strings.Contains(err.Error(), "network") {
+			fmt.Println("\n🌐 Network Error Detected:")
+			fmt.Println("  Please check your internet connection")
+			fmt.Println("  Microsoft Graph API may be temporarily unavailable")
+			fmt.Println("  Try again in a few minutes")
+		} else {
+			fmt.Println("\n⚠️ Connection Error:")
+			fmt.Println("  Please verify your configuration and network connectivity")
+		}
+
+		fmt.Println("\n🔄 Note: Your image has NOT been cached due to this connection failure.")
+		fmt.Println("   You can safely retry clip-upload after fixing the issue.")
+
+		// Update task session with error
+		taskManager.UpdateTaskStatus(taskSession, task.TaskStatusFailed,
+			fmt.Sprintf("Microsoft Graph connection test failed: %v", err))
+
+		// Exit with error code but don't cache the image
+		os.Exit(1)
 	}
 	fmt.Println("✓ Microsoft Graph connection successful")
 
@@ -1477,6 +1511,7 @@ func handleClipUpload(options CommandOptions) {
 		}
 
 	// Send to Microsoft Todo with full details
+	fmt.Println("Creating Microsoft Todo task...")
 	err = todoClient.CreateTaskWithDetails(
 		parsedReminder.Original.Title,
 		parsedReminder.Description,
@@ -1487,7 +1522,46 @@ func handleClipUpload(options CommandOptions) {
 		serverConfig.MicrosoftTodo.Timezone,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create task: %v", err)
+		// Handle Microsoft Todo task creation failure gracefully
+		fmt.Printf("\n❌ Failed to create Microsoft Todo task: %v\n", err)
+
+		// Provide specific guidance based on error type
+		if strings.Contains(err.Error(), "authentication") || strings.Contains(err.Error(), "unauthorized") {
+			fmt.Println("\n🔧 Authentication Error Detected:")
+			fmt.Println("  Please check your Microsoft Todo configuration in config/server.yaml:")
+			fmt.Println("  - tenant_id")
+			fmt.Println("  - client_id")
+			fmt.Println("  - client_secret")
+			fmt.Println("  - user_email")
+			fmt.Println("\n💡 You can test your configuration with: ./to_icalendar test")
+		} else if strings.Contains(err.Error(), "connection") || strings.Contains(err.Error(), "network") {
+			fmt.Println("\n🌐 Network Error Detected:")
+			fmt.Println("  Please check your internet connection")
+			fmt.Println("  Microsoft Graph API may be temporarily unavailable")
+		} else {
+			fmt.Println("\n⚠️ Unknown Error:")
+			fmt.Println("  Please check the error message above and try again")
+		}
+
+		fmt.Println("\n🔄 Note: Your image has NOT been cached due to this failure.")
+		fmt.Println("   You can safely retry clip-upload after fixing the issue.")
+
+		// Update task session with error
+		taskManager.UpdateTaskStatus(taskSession, task.TaskStatusFailed,
+			fmt.Sprintf("Microsoft Todo task creation failed: %v", err))
+
+		// Exit with error code but don't cache the image
+		os.Exit(1)
+	}
+
+	// Microsoft Todo task created successfully - now record image cache
+	if contentType == models.ContentTypeImage && deduplicator != nil {
+		// For images, record the cache now that Microsoft Todo task was created successfully
+		if err := imageProcessor.RecordImageCache(imageData, processingResult, ""); err != nil {
+			fmt.Printf("  ⚠️ Failed to record image cache: %v\n", err)
+		} else {
+			fmt.Printf("  ✅ Image cache recorded successfully\n")
+		}
 	}
 
 	// Record successful submission to cache

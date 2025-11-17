@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/internal/cache"
 	"github.com/allanpk716/to_icalendar/internal/deduplication"
 	"github.com/allanpk716/to_icalendar/internal/dify"
 	"github.com/allanpk716/to_icalendar/internal/image"
@@ -33,6 +34,11 @@ func NewImageProcessor(difyProcessor *dify.Processor) (*ImageProcessor, error) {
 
 // NewImageProcessorWithDeduplication creates a new image processor with deduplication
 func NewImageProcessorWithDeduplication(difyProcessor *dify.Processor, deduplicator *deduplication.Deduplicator) (*ImageProcessor, error) {
+	return NewImageProcessorWithDeduplicationAndCache(difyProcessor, deduplicator, nil)
+}
+
+// NewImageProcessorWithDeduplicationAndCache creates a new image processor with deduplication and unified cache
+func NewImageProcessorWithDeduplicationAndCache(difyProcessor *dify.Processor, deduplicator *deduplication.Deduplicator, unifiedCacheMgr *cache.UnifiedCacheManager) (*ImageProcessor, error) {
 	// 创建临时目录
 	tempDir := filepath.Join(os.TempDir(), "to_icalendar_images")
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
@@ -40,9 +46,26 @@ func NewImageProcessorWithDeduplication(difyProcessor *dify.Processor, deduplica
 	}
 
 	logger := logrus.New()
-	configManager := image.NewConfigManager(".", logger)
-	if err := configManager.LoadConfig(); err != nil {
-		log.Printf("加载图片处理配置失败: %v", err)
+	var configManager *image.ConfigManager
+	var err error
+
+	// 尝试使用统一缓存管理器
+	if unifiedCacheMgr != nil {
+		configManager, err = image.NewConfigManagerWithUnifiedCache(".", logger)
+		if err == nil {
+			configManager.SetUnifiedCacheManager(unifiedCacheMgr)
+			logger.Printf("使用统一缓存管理器初始化图片处理器")
+		} else {
+			logger.Printf("创建带统一缓存的配置管理器失败: %v", err)
+		}
+	}
+
+	// 如果统一缓存管理器初始化失败，使用默认方式
+	if configManager == nil {
+		configManager = image.NewConfigManager(".", logger)
+		if err := configManager.LoadConfig(); err != nil {
+			logger.Printf("加载图片处理配置失败: %v", err)
+		}
 	}
 
 	return &ImageProcessor{
@@ -79,6 +102,11 @@ func NewImageProcessorWithNormalizer(difyProcessor *dify.Processor, normalizer *
 
 // ProcessClipboardImage processes an image from clipboard
 func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData []byte) (*models.ProcessingResult, error) {
+	return ip.ProcessClipboardImageWithCacheControl(ctx, imageData, true)
+}
+
+// ProcessClipboardImageWithCacheControl processes an image from clipboard with cache control
+func (ip *ImageProcessor) ProcessClipboardImageWithCacheControl(ctx context.Context, imageData []byte, recordCache bool) (*models.ProcessingResult, error) {
 	startTime := time.Now()
 
 	log.Printf("开始处理剪贴板图片，大小: %d bytes", len(imageData))
@@ -184,8 +212,8 @@ func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData [
 		ProcessingTime: time.Since(startTime),
 	}
 
-	// 记录图片处理结果到缓存（如果启用了去重功能）
-	if ip.deduplicator != nil {
+	// 记录图片处理结果到缓存（如果启用了去重功能且允许记录缓存）
+	if ip.deduplicator != nil && recordCache {
 		taskHash := ""
 		title := ""
 		if result.Reminder != nil {
@@ -208,6 +236,8 @@ func (ip *ImageProcessor) ProcessClipboardImage(ctx context.Context, imageData [
 		} else {
 			log.Printf("图片处理结果已记录到缓存")
 		}
+	} else if !recordCache {
+		log.Printf("缓存记录已禁用，跳过缓存记录")
 	}
 
 	log.Printf("图片处理完成，成功: %v", result.Success)
@@ -448,4 +478,36 @@ func (ip *ImageProcessor) IsCacheEnabled() bool {
 		return ip.configManager.IsCacheEnabled()
 	}
 	return false
+}
+
+// RecordImageCache records image processing result to cache separately
+func (ip *ImageProcessor) RecordImageCache(imageData []byte, result *models.ProcessingResult, tempFilePath string) error {
+	if ip.deduplicator == nil {
+		return fmt.Errorf("deduplicator not available")
+	}
+
+	taskHash := ""
+	title := ""
+	if result.Reminder != nil {
+		// 生成任务哈希用于关联
+		if parsedReminder, err := models.ParseReminderTime(*result.Reminder, time.Local); err == nil {
+			// 通过去重器的缓存管理器生成哈希
+			cacheManager := ip.deduplicator.GetCacheManager()
+			if cacheManager != nil {
+				taskHash = cacheManager.GenerateTaskHash(parsedReminder)
+			}
+		}
+		title = result.Reminder.Title
+	} else if result.ParsedInfo != nil {
+		title = result.ParsedInfo.Title
+	}
+
+	processTime := result.ProcessingTime.String()
+	if err := ip.deduplicator.RecordProcessedImage(imageData, taskHash, title, result.Success, processTime, tempFilePath); err != nil {
+		log.Printf("记录图片处理结果失败: %v", err)
+		return err
+	}
+
+	log.Printf("图片处理结果已记录到缓存")
+	return nil
 }

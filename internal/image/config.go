@@ -36,7 +36,7 @@ func DefaultImageProcessingConfig() *ImageProcessingConfig {
 		DebugMode:           false,
 		DebugOutputDir:      "debug/images",
 		EnableCache:         true,
-		CacheDir:            "cache/images",
+		CacheDir:            "", // 将由统一缓存管理器设置
 		MaxCacheFiles:       50,
 	}
 }

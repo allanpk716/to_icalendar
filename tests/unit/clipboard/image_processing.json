@@ -12,6 +12,6 @@
   "debug_mode": false,
   "debug_output_dir": "debug/images",
   "enable_cache": true,
-  "cache_dir": "cache/images",
+  "cache_dir": "",
   "max_cache_files": 50
 }
