@@ -20,8 +20,18 @@ func main() {
 
 	// 测试配置管理器
 	fmt.Println("\n1. 测试配置管理器...")
-	configManager := image.NewConfigManager(".", logger)
-	err := configManager.LoadConfig()
+
+	// 使用临时目录进行测试，避免影响实际配置
+	tempConfigDir, err := os.MkdirTemp("", "to_icalendar_cache_test_*")
+	if err != nil {
+		log.Fatalf("创建临时配置目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempConfigDir)
+
+	fmt.Printf("使用临时配置目录: %s\n", tempConfigDir)
+
+	configManager := image.NewConfigManager(tempConfigDir, logger)
+	err = configManager.LoadConfig()
 	if err != nil {
 		log.Printf("加载配置失败: %v", err)
 		return
@@ -67,7 +77,7 @@ func main() {
 	// 创建一个简单的 Dify 处理器（模拟）
 	difyProcessor := &dify.Processor{} // 简化，仅用于测试
 
-	imageProcessor, err := processors.NewImageProcessor(difyProcessor)
+	imageProcessor, err := processors.NewImageProcessorWithNormalizerAndDir(difyProcessor, nil, tempConfigDir)
 	if err != nil {
 		log.Printf("创建图片处理器失败: %v", err)
 		return

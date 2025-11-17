@@ -19,11 +19,13 @@ import (
 	"github.com/allanpk716/to_icalendar/internal/config"
 	"github.com/allanpk716/to_icalendar/internal/deduplication"
 	"github.com/allanpk716/to_icalendar/internal/dify"
+	"github.com/allanpk716/to_icalendar/internal/image"
 	"github.com/allanpk716/to_icalendar/internal/logger"
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/allanpk716/to_icalendar/internal/processors"
 	"github.com/allanpk716/to_icalendar/internal/task"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -78,6 +80,12 @@ func initializeCacheSystem() (*cache.UnifiedCacheManager, error) {
 	configDir, err := getConfigDir()
 	if err != nil {
 		return nil, fmt.Errorf("获取配置目录失败: %w", err)
+	}
+
+	// 检查并迁移配置文件
+	if err := checkAndMigrateConfigFiles(configDir); err != nil {
+		log.Printf("配置文件迁移失败: %v", err)
+		// 迁移失败不应该阻止程序启动，只记录日志
 	}
 
 	// 创建统一缓存管理器
@@ -1021,12 +1029,12 @@ func handleClip() {
 		deduplicator = deduplication.NewDeduplicator(&dedupConfig, cacheManager)
 	}
 
-	// Initialize image processor with deduplication
+	// Initialize image processor with deduplication and user config directory
 	var imageProcessor *processors.ImageProcessor
 	if deduplicator != nil {
-		imageProcessor, err = processors.NewImageProcessorWithDeduplication(difyProcessor, deduplicator)
+		imageProcessor, err = processors.NewImageProcessorWithDeduplicationAndCacheInDir(difyProcessor, deduplicator, unifiedCacheMgr, configDir)
 	} else {
-		imageProcessor, err = processors.NewImageProcessor(difyProcessor)
+		imageProcessor, err = processors.NewImageProcessorWithNormalizerAndDir(difyProcessor, nil, configDir)
 	}
 	if err != nil {
 		log.Fatalf("Failed to create image processor: %v", err)
@@ -1302,8 +1310,8 @@ func handleClipUpload(options CommandOptions) {
 
 		difyProcessor := dify.NewProcessor(difyClient, "clip-upload-user", processingOptions)
 
-		// Initialize image processor with deduplication
-		imageProcessor, err = processors.NewImageProcessorWithDeduplication(difyProcessor, deduplicator)
+		// Initialize image processor with deduplication and user config directory
+		imageProcessor, err = processors.NewImageProcessorWithDeduplicationAndCacheInDir(difyProcessor, deduplicator, unifiedCacheMgr, configDir)
 		if err != nil {
 			log.Fatalf("Failed to create image processor with deduplication: %v", err)
 		}
@@ -1711,6 +1719,21 @@ func min(a, b int) int {
 func generateImageHash(imageData []byte) string {
 	hash := sha256.Sum256(imageData)
 	return hex.EncodeToString(hash[:])
+}
+
+// checkAndMigrateConfigFiles 检查并迁移配置文件到用户配置目录
+func checkAndMigrateConfigFiles(configDir string) error {
+	logger := logrus.New()
+
+	// 检查并迁移图片处理配置
+	oldImagePath := "./image_processing.json"
+	newImagePath := filepath.Join(configDir, "image_processing.json")
+
+	if err := image.MigrateImageProcessingConfig(oldImagePath, newImagePath, logger); err != nil {
+		return fmt.Errorf("迁移图片处理配置失败: %w", err)
+	}
+
+	return nil
 }
 
 // handleTasks 处理任务管理命令

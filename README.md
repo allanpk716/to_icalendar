@@ -46,12 +46,13 @@ go build -o to_icalendar main.go
 ```
 
 这将创建配置文件模板：
-- `config/server.yaml` - 服务配置文件
-- `config/reminder.json` - 提醒事项模板
+- `~/.to_icalendar/server.yaml` - 服务配置文件
+- `~/.to_icalendar/reminder.json` - 提醒事项模板
+- `~/.to_icalendar/image_processing.json` - 图片处理配置（自动创建）
 
 ### 2. 配置 Microsoft Todo
 
-编辑 `config/server.yaml`：
+编辑 `~/.to_icalendar/server.yaml`：
 
 ```yaml
 microsoft_todo:
@@ -63,7 +64,7 @@ microsoft_todo:
 
 ### 3. 创建提醒事项
 
-编辑 `config/reminder.json` 或创建新的 JSON 文件：
+编辑 `~/.to_icalendar/reminder.json` 或创建新的 JSON 文件：
 
 ```json
 {
@@ -99,7 +100,7 @@ microsoft_todo:
 
 ```bash
 # 发送单个提醒事项
-./to_icalendar upload config/reminder.json
+./to_icalendar upload ~/.to_icalendar/reminder.json
 
 # 批量发送提醒事项
 ./to_icalendar upload reminders/*.json
@@ -160,7 +161,7 @@ microsoft_todo:
 
 ### 6. 配置应用程序
 
-将获取的信息填入 `config/server.yaml`：
+将获取的信息填入 `~/.to_icalendar/server.yaml`：
 
 ```yaml
 microsoft_todo:
@@ -293,12 +294,14 @@ microsoft_todo:
 ```
 to_icalendar/
 ├── main.go                    # 主程序入口
-├── config/
+├── ~/.to_icalendar/           # 用户配置目录
 │   ├── server.yaml           # 服务配置
-│   └── reminder.json         # 提醒事项模板
+│   ├── reminder.json         # 提醒事项模板
+│   └── image_processing.json # 图片处理配置
 └── internal/
     ├── config/               # 配置管理
     ├── models/               # 数据结构
+    ├── image/                # 图片处理
     └── microsoft-todo/       # Microsoft Todo 客户端
 ```
 

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/allanpk716/to_icalendar/internal/image"
 	"github.com/sirupsen/logrus"
@@ -25,13 +27,24 @@ func main() {
 
 	// 测试配置管理器
 	fmt.Println("\n=== 配置管理器测试 ===")
-	configManager := image.NewConfigManager(".", logger)
-	err := configManager.LoadConfig()
+
+	// 使用临时目录进行测试，避免影响实际配置
+	tempConfigDir, err := os.MkdirTemp("", "to_icalendar_test_*")
+	if err != nil {
+		log.Fatalf("创建临时配置目录失败: %v", err)
+	}
+	defer os.RemoveAll(tempConfigDir)
+
+	fmt.Printf("使用临时配置目录: %s\n", tempConfigDir)
+
+	configManager := image.NewConfigManager(tempConfigDir, logger)
+	err = configManager.LoadConfig()
 	if err != nil {
 		log.Printf("加载配置失败: %v", err)
 	} else {
 		fmt.Printf("配置加载成功，标准化功能: %s\n",
 			map[bool]string{true: "启用", false: "禁用"}[configManager.IsNormalizationEnabled()])
+		fmt.Printf("配置文件路径: %s\n", filepath.Join(tempConfigDir, "image_processing.json"))
 	}
 
 	// 获取标准化器

@@ -39,6 +39,11 @@ func NewImageProcessorWithDeduplication(difyProcessor *dify.Processor, deduplica
 
 // NewImageProcessorWithDeduplicationAndCache creates a new image processor with deduplication and unified cache
 func NewImageProcessorWithDeduplicationAndCache(difyProcessor *dify.Processor, deduplicator *deduplication.Deduplicator, unifiedCacheMgr *cache.UnifiedCacheManager) (*ImageProcessor, error) {
+	return NewImageProcessorWithDeduplicationAndCacheInDir(difyProcessor, deduplicator, unifiedCacheMgr, "")
+}
+
+// NewImageProcessorWithDeduplicationAndCacheInDir creates a new image processor with deduplication and unified cache in specific config directory
+func NewImageProcessorWithDeduplicationAndCacheInDir(difyProcessor *dify.Processor, deduplicator *deduplication.Deduplicator, unifiedCacheMgr *cache.UnifiedCacheManager, configDir string) (*ImageProcessor, error) {
 	// 创建临时目录
 	tempDir := filepath.Join(os.TempDir(), "to_icalendar_images")
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
@@ -49,12 +54,24 @@ func NewImageProcessorWithDeduplicationAndCache(difyProcessor *dify.Processor, d
 	var configManager *image.ConfigManager
 	var err error
 
+	// 如果没有指定配置目录，尝试从统一缓存管理器获取
+	if configDir == "" && unifiedCacheMgr != nil {
+		// 从缓存目录推断配置目录
+		cacheBaseDir := unifiedCacheMgr.GetBaseCacheDir()
+		configDir = filepath.Dir(cacheBaseDir)
+	}
+
+	// 如果仍然没有配置目录，使用当前目录（向后兼容）
+	if configDir == "" {
+		configDir = "."
+	}
+
 	// 尝试使用统一缓存管理器
 	if unifiedCacheMgr != nil {
-		configManager, err = image.NewConfigManagerWithUnifiedCache(".", logger)
+		configManager, err = image.NewConfigManagerWithUnifiedCache(configDir, logger)
 		if err == nil {
 			configManager.SetUnifiedCacheManager(unifiedCacheMgr)
-			logger.Printf("使用统一缓存管理器初始化图片处理器")
+			logger.Printf("使用统一缓存管理器初始化图片处理器，配置目录: %s", configDir)
 		} else {
 			logger.Printf("创建带统一缓存的配置管理器失败: %v", err)
 		}
@@ -62,7 +79,7 @@ func NewImageProcessorWithDeduplicationAndCache(difyProcessor *dify.Processor, d
 
 	// 如果统一缓存管理器初始化失败，使用默认方式
 	if configManager == nil {
-		configManager = image.NewConfigManager(".", logger)
+		configManager = image.NewConfigManager(configDir, logger)
 		if err := configManager.LoadConfig(); err != nil {
 			logger.Printf("加载图片处理配置失败: %v", err)
 		}
@@ -79,6 +96,11 @@ func NewImageProcessorWithDeduplicationAndCache(difyProcessor *dify.Processor, d
 
 // NewImageProcessorWithNormalizer creates a new image processor with image normalizer
 func NewImageProcessorWithNormalizer(difyProcessor *dify.Processor, normalizer *image.ImageNormalizer) (*ImageProcessor, error) {
+	return NewImageProcessorWithNormalizerAndDir(difyProcessor, normalizer, "")
+}
+
+// NewImageProcessorWithNormalizerAndDir creates a new image processor with image normalizer in specific config directory
+func NewImageProcessorWithNormalizerAndDir(difyProcessor *dify.Processor, normalizer *image.ImageNormalizer, configDir string) (*ImageProcessor, error) {
 	// 创建临时目录
 	tempDir := filepath.Join(os.TempDir(), "to_icalendar_images")
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
@@ -86,7 +108,13 @@ func NewImageProcessorWithNormalizer(difyProcessor *dify.Processor, normalizer *
 	}
 
 	logger := logrus.New()
-	configManager := image.NewConfigManager(".", logger)
+
+	// 如果没有指定配置目录，使用当前目录（向后兼容）
+	if configDir == "" {
+		configDir = "."
+	}
+
+	configManager := image.NewConfigManager(configDir, logger)
 	if err := configManager.LoadConfig(); err != nil {
 		log.Printf("加载图片处理配置失败: %v", err)
 	}

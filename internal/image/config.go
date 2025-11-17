@@ -118,9 +118,69 @@ func GetConfigPath(configDir string) string {
 	return filepath.Join(configDir, "image_processing.json")
 }
 
+// getConfigPathWithFallback 获取带向后兼容的配置文件路径
+// 优先使用用户配置目录，如果不存在且当前目录有配置文件，则使用当前目录
+func getConfigPathWithFallback(configDir string, logger *logrus.Logger) string {
+	userPath := GetConfigPath(configDir)
+
+	// 检查用户配置目录中的文件是否存在
+	if _, err := os.Stat(userPath); err == nil {
+		return userPath
+	}
+
+	// 如果用户配置目录不存在，尝试当前目录
+	currentPath := "./image_processing.json"
+	if _, err := os.Stat(currentPath); err == nil {
+		if logger != nil {
+			logger.Warnf("使用当前目录的配置文件: %s，建议迁移到用户配置目录: %s", currentPath, userPath)
+		}
+		return currentPath
+	}
+
+	// 都不存在，使用用户配置目录（会自动创建）
+	return userPath
+}
+
+// MigrateImageProcessingConfig 迁移图片处理配置文件
+func MigrateImageProcessingConfig(oldPath string, newPath string, logger *logrus.Logger) error {
+	// 检查旧文件是否存在
+	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+		return nil // 无需迁移
+	}
+
+	// 检查新文件是否已存在
+	if _, err := os.Stat(newPath); err == nil {
+		if logger != nil {
+			logger.Infof("目标配置文件已存在，跳过迁移: %s", newPath)
+		}
+		return nil
+	}
+
+	// 确保新目录存在
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
+
+	// 复制配置文件到新位置
+	data, err := os.ReadFile(oldPath)
+	if err != nil {
+		return fmt.Errorf("读取旧配置失败: %w", err)
+	}
+
+	if err := os.WriteFile(newPath, data, 0644); err != nil {
+		return fmt.Errorf("写入新配置失败: %w", err)
+	}
+
+	if logger != nil {
+		logger.Infof("图片处理配置已迁移: %s -> %s", oldPath, newPath)
+	}
+
+	return nil
+}
+
 // LoadOrCreateConfig 加载或创建配置
 func LoadOrCreateConfig(configDir string, logger *logrus.Logger) (*ImageProcessingConfig, error) {
-	configPath := GetConfigPath(configDir)
+	configPath := getConfigPathWithFallback(configDir, logger)
 	config := DefaultImageProcessingConfig()
 
 	// 尝试加载现有配置
@@ -130,11 +190,12 @@ func LoadOrCreateConfig(configDir string, logger *logrus.Logger) (*ImageProcessi
 		// 使用默认配置
 		config = DefaultImageProcessingConfig()
 
-		// 尝试保存默认配置
-		if saveErr := config.SaveToFile(configPath); saveErr != nil {
+		// 尝试保存默认配置到用户配置目录
+		userConfigPath := GetConfigPath(configDir)
+		if saveErr := config.SaveToFile(userConfigPath); saveErr != nil {
 			logger.Warnf("保存默认配置失败: %v", saveErr)
 		} else {
-			logger.Infof("已创建默认图片处理配置: %s", configPath)
+			logger.Infof("已创建默认图片处理配置: %s", userConfigPath)
 		}
 	}
 

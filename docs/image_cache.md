@@ -18,9 +18,9 @@
 
 ### 缓存位置
 
-默认缓存目录：`./cache/images`（相对于程序运行目录）
+默认缓存目录：`~/.to_icalendar/cache/images`（用户配置目录下的缓存子目录）
 
-配置文件：`./image_processing.json`
+配置文件：`~/.to_icalendar/image_processing.json`（用户配置目录）
 
 ## 配置选项
 
@@ -60,7 +60,7 @@
 
 ```bash
 # 查看缓存目录
-ls cache/images
+ls ~/.to_icalendar/cache/images
 
 # 输出示例：
 # clipboard_original_20251114_092458_123456.png
@@ -94,7 +94,7 @@ ls cache/images
 
 ```bash
 # 查看最新生成的缓存文件
-ls -la cache/images | tail -2
+ls -la ~/.to_icalendar/cache/images | tail -2
 ```
 
 ### 3. 分析图片质量
@@ -122,7 +122,7 @@ ls -la cache/images | tail -2
 
 ### 调整标准化参数
 
-编辑 `image_processing.json` 文件：
+编辑 `~/.to_icalendar/image_processing.json` 文件：
 
 ```json
 {
@@ -178,11 +178,11 @@ ls -la cache/images | tail -2
 
 ```bash
 # 清空所有缓存文件
-rm -rf cache/images/*
+rm -rf ~/.to_icalendar/cache/images/*
 
 # 或者只删除特定类型的文件
-rm cache/images/clipboard_original_*
-rm cache/images/clipboard_normalized_*
+rm ~/.to_icalendar/cache/images/clipboard_original_*
+rm ~/.to_icalendar/cache/images/clipboard_normalized_*
 ```
 
 ## 故障排除
@@ -191,12 +191,12 @@ rm cache/images/clipboard_normalized_*
 
 **检查配置：**
 ```bash
-cat image_processing.json | grep enable_cache
+cat ~/.to_icalendar/image_processing.json | grep enable_cache
 ```
 
 **检查权限：**
 ```bash
-ls -la cache/
+ls -la ~/.to_icalendar/cache/
 ```
 
 ### 2. 图片文件损坏
@@ -210,8 +210,8 @@ ls -la cache/
 
 确保目录存在且有写权限：
 ```bash
-mkdir -p cache/images
-chmod 755 cache/images
+mkdir -p ~/.to_icalendar/cache/images
+chmod 755 ~/.to_icalendar/cache/images
 ```
 
 ## 调试技巧
@@ -238,7 +238,7 @@ go build -o test_cache.exe ./cmd/test_cache/main.go
 
 对比文件大小有助于识别问题：
 ```bash
-ls -lh cache/images/
+ls -lh ~/.to_icalendar/cache/images/
 ```
 
 - 如果标准化后文件大小明显小于原始文件，可能过度压缩
