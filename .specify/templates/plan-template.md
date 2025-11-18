@@ -31,25 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-**代码质量卓越 (Code Quality Excellence)**:
-- ✅ 设计是否符合SOLID原则？
-- ✅ 是否遵循DRY和KISS原则？
-- ✅ 错误处理是否使用显式返回模式和结构化日志？
-
-**测试优先开发 (Test-First Development)**:
-- ✅ 是否包含完整的测试策略？
-- ✅ 是否明确测试分类（单元测试、集成测试、端到端测试）？
-- ✅ 测试用例是否作为功能文档？
-
-**用户体验一致性 (User Experience Consistency)**:
-- ✅ CLI接口设计是否标准化？
-- ✅ 错误信息是否本地化为中文？
-- ✅ 跨平台兼容性是否考虑？
-
-**性能与可靠性标准 (Performance & Reliability Standards)**:
-- ✅ 是否定义明确的性能目标？
-- ✅ 错误恢复和重试机制是否设计？
-- ✅ 资源管理和清理策略是否明确？
+[Gates determined based on constitution file]
 
 ## Project Structure
 

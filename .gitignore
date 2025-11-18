@@ -7,3 +7,4 @@
 /cmd/to_icalendar/to_icalendar
 /nul
 *.log
+/.claude
