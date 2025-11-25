@@ -53,10 +53,35 @@ func (a *App) setupSystemTray() {
 
 // onSystrayReady is called when the system tray is ready
 func (a *App) onSystrayReady() {
-	// Skip icon setting to avoid errors, use title only
-	systray.SetTitle("📅 to_icalendar")
+	fmt.Println("Initializing system tray with icon...")
+
+	// 1. 优先尝试加载ICO文件 (最佳兼容性)
+	iconData, err := a.loadIconFromFile("./build/windows/icon.ico")
+	if err != nil {
+		fmt.Printf("Failed to load ICO icon: %v\n", err)
+
+		// 2. 备用：尝试加载32x32 PNG图标
+		iconData, err = a.loadIconFromFile("./assets/icons/tray-32.png")
+		if err != nil {
+			fmt.Printf("Failed to load PNG icon: %v\n", err)
+
+			// 3. 兜底：使用内置图标数据
+			fmt.Println("Using built-in icon as fallback")
+			iconData = a.createSimpleTrayIcon()
+		} else {
+			fmt.Println("Successfully loaded PNG icon")
+		}
+	} else {
+		fmt.Println("Successfully loaded ICO icon")
+	}
+
+	// 设置图标 (关键修复点)
+	systray.SetIcon(iconData)
+
+	// 保留标题作为辅助显示
+	systray.SetTitle("to_icalendar") // 移除emoji，因为现在有图标了
 	systray.SetTooltip("to_icalendar - Microsoft Todo Reminders")
-	fmt.Println("System tray initialized with title only")
+	fmt.Println("System tray initialized with icon and title")
 
 	// Show window menu item
 	mShow := systray.AddMenuItem("显示窗口", "显示主窗口")
