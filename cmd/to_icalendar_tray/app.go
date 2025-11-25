@@ -87,14 +87,7 @@ func (a *App) onSystrayReady() {
 		}
 	}()
 
-	// Hide window menu item
-	mHide := systray.AddMenuItem("隐藏窗口", "隐藏主窗口")
-	go func() {
-		for range mHide.ClickedCh {
-			a.HideWindow()
-		}
-	}()
-
+	
 	systray.AddSeparator()
 
 	// Exit menu item
