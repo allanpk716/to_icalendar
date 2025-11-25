@@ -23,6 +23,5 @@
   "upx": false,
   "upxflags": "",
   "runNonNativeBuildHooks": false,
-  "windowStartState": "hidden",
   "assetdir": "./frontend/dist"
 }
