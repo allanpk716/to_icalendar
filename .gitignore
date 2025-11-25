@@ -8,3 +8,46 @@
 /nul
 *.log
 /.claude
+# Go 构建输出
+*.exe
+/to_icalendar
+/cmd/to_icalendar/to_icalendar
+/cmd/to_icalendar_tray/to_icalendar_tray
+/dist/
+
+# 配置文件
+/config
+
+# 日志文件
+**/Logs/
+*.log
+
+# 缓存目录
+**/cache/
+**/.cache/
+*cache/images/*
+/cmd/to_icalendar/cache/images
+
+# 测试文件
+/cmd/test_dify/test-images
+/cmd/test_dify/test-result.json
+/nul
+
+# Claude 相关
+/.claude
+
+# 前端相关 (适用于 wails 项目)
+**/node_modules/
+**/package-lock.json
+**/package.json.md5
+**/frontend/dist/
+**/frontend/wailsjs/
+**/build/bin/
+**/build/windows/
+**/build/darwin/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp

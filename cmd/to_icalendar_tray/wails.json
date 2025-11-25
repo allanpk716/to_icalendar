@@ -1,0 +1,28 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "to_icalendar_tray",
+  "outputfilename": "to_icalendar_tray",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "allan716",
+    "email": "525223688@qq.com"
+  },
+  "info": {
+    "companyName": "to_icalendar",
+    "productName": "to_icalendar Tray",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2025 to_icalendar",
+    "comments": "Microsoft Todo reminder tool with system tray support"
+  },
+  "nsisType": "multiple",
+  "obfuscated": false,
+  "garbleargs": "",
+  "upx": false,
+  "upxflags": "",
+  "runNonNativeBuildHooks": false,
+  "windowStartState": "hidden",
+  "assetdir": "./frontend/dist"
+}

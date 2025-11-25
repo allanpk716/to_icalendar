@@ -1,0 +1,38 @@
+name = "to_icalendar"
+outputfilename = "to_icalendar_tray_v2"
+frontenddir = "./frontend"
+
+[appname]
+name = "to_icalendar"
+title = "to_icalendar"
+
+[author]
+name = "to_icalendar"
+email = "to_icalendar@example.com"
+
+[info]
+productname = "to_icalendar"
+productversion = "1.0.0"
+companyname = "to_icalendar"
+copyright = "Copyright (c) 2024 to_icalendar"
+comments = "Microsoft Todo Reminders"
+
+[build]
+targets = ["windows"]
+
+[frontend]
+build = "npm run build"
+dev = "npm run dev"
+
+[nsis]
+enabled = true
+installerIcon = "build/appicon.png"
+uninstallerIcon = "build/appicon.png"
+productName = "to_icalendar"
+installPath = "C:\\Program Files\\to_icalendar"
+
+[windows]
+icon = "build/appicon.png"
+
+# 也可以尝试直接指定源文件
+# icon = "assets/icons/appicon.png"

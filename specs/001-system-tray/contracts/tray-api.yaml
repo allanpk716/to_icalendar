@@ -1,0 +1,483 @@
+openapi: 3.0.3
+info:
+  title: to_icalendar System Tray API
+  description: API for managing system tray functionality in to_icalendar application
+  version: 1.0.0
+  contact:
+    name: to_icalendar Team
+  license:
+    name: MIT
+
+servers:
+  - url: 'http://localhost:34115'
+    description: Development server (internal communication only)
+
+paths:
+  /tray/status:
+    get:
+      summary: Get tray application status
+      description: Returns current status of the tray application
+      operationId: getTrayStatus
+      tags:
+        - Tray Management
+      responses:
+        '200':
+          description: Tray status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrayStatusResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tray/config:
+    get:
+      summary: Get tray configuration
+      description: Returns current tray application configuration
+      operationId: getTrayConfig
+      tags:
+        - Configuration
+      responses:
+        '200':
+          description: Tray configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrayConfigResponse'
+        '404':
+          description: Configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Update tray configuration
+      description: Updates tray application configuration
+      operationId: updateTrayConfig
+      tags:
+        - Configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrayConfigRequest'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrayConfigResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tray/menu:
+    get:
+      summary: Get tray menu configuration
+      description: Returns current tray menu items and structure
+      operationId: getTrayMenu
+      tags:
+        - Menu Management
+      responses:
+        '200':
+          description: Tray menu retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrayMenuResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Execute tray menu action
+      description: Executes an action from tray menu
+      operationId: executeMenuAction
+      tags:
+        - Menu Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MenuActionRequest'
+      responses:
+        '200':
+          description: Action executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuActionResponse'
+        '400':
+          description: Invalid action or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Action not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tray/quit:
+    post:
+      summary: Quit tray application
+      description: Gracefully shuts down the tray application
+      operationId: quitTrayApp
+      tags:
+        - Application Lifecycle
+      responses:
+        '200':
+          description: Quit command accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuitResponse'
+        '500':
+          description: Error during shutdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tray/window/show:
+    post:
+      summary: Show main window
+      description: Makes the main application window visible
+      operationId: showMainWindow
+      tags:
+        - Window Management
+      responses:
+        '200':
+          description: Window shown successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowResponse'
+        '500':
+          description: Error showing window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /tray/window/hide:
+    post:
+      summary: Hide main window
+      description: Hides the main application window
+      operationId: hideMainWindow
+      tags:
+        - Window Management
+      responses:
+        '200':
+          description: Window hidden successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WindowResponse'
+        '500':
+          description: Error hiding window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    TrayStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/ApplicationState'
+        message:
+          type: string
+          example: "Status retrieved successfully"
+
+    TrayConfigResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/TrayApplication'
+        message:
+          type: string
+          example: "Configuration retrieved successfully"
+
+    TrayConfigRequest:
+      type: object
+      required:
+        - name
+        - icon_path
+        - start_hidden
+      properties:
+        name:
+          type: string
+          description: Application display name
+          example: "to_icalendar"
+          minLength: 1
+          maxLength: 50
+        icon_path:
+          type: string
+          description: Path to tray icon file
+          example: "assets/icons/tray-32.png"
+        tooltip:
+          type: string
+          description: Tooltip text for tray icon
+          example: "to_icalendar - 任务提醒工具"
+          maxLength: 100
+        start_hidden:
+          type: boolean
+          description: Whether to start with hidden main window
+          example: true
+
+    TrayMenuResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/TrayMenu'
+        message:
+          type: string
+          example: "Menu retrieved successfully"
+
+    MenuActionRequest:
+      type: object
+      required:
+        - action_id
+      properties:
+        action_id:
+          type: string
+          description: ID of the menu action to execute
+          example: "quit"
+        parameters:
+          type: object
+          description: Additional parameters for the action
+          additionalProperties: true
+
+    MenuActionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          description: Action result data
+          additionalProperties: true
+        message:
+          type: string
+          example: "Action executed successfully"
+
+    QuitResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Quit command accepted, application will shutdown"
+
+    WindowResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            is_visible:
+              type: boolean
+              example: true
+        message:
+          type: string
+          example: "Window operation completed successfully"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "Invalid request parameters"
+            details:
+              type: object
+              additionalProperties: true
+
+    ApplicationState:
+      type: object
+      properties:
+        app_id:
+          type: string
+          example: "to_icalendar_tray"
+        is_running:
+          type: boolean
+          example: true
+        is_visible:
+          type: boolean
+          example: false
+        last_activity:
+          type: string
+          format: date-time
+          example: "2025-01-25T10:30:00Z"
+        process_id:
+          type: integer
+          example: 12345
+        memory_usage:
+          type: integer
+          format: int64
+          example: 41943040
+        cpu_usage:
+          type: number
+          format: double
+          example: 0.5
+        start_up_time:
+          type: string
+          format: date-time
+          example: "2025-01-25T09:00:00Z"
+
+    TrayApplication:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "to_icalendar_tray"
+        name:
+          type: string
+          example: "to_icalendar"
+        version:
+          type: string
+          example: "1.0.0"
+        icon_path:
+          type: string
+          example: "assets/icons/tray-32.png"
+        tooltip:
+          type: string
+          example: "to_icalendar - 任务提醒工具"
+        start_hidden:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-01-25T09:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2025-01-25T09:00:00Z"
+
+    TrayMenu:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "main_menu"
+        app_id:
+          type: string
+          example: "to_icalendar_tray"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MenuItem'
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-01-25T09:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2025-01-25T09:00:00Z"
+
+    MenuItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "quit"
+        label:
+          type: string
+          example: "退出"
+        tooltip:
+          type: string
+          example: "退出应用程序"
+        type:
+          type: string
+          enum: [action, submenu, separator]
+          example: "action"
+        action:
+          type: string
+          example: "quit"
+        shortcut:
+          type: string
+          example: "Ctrl+Q"
+        is_separator:
+          type: boolean
+          example: false
+        is_enabled:
+          type: boolean
+          example: true
+        order:
+          type: integer
+          example: 1
+
+  securitySchemes:
+    internal:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: Internal token for tray application communication
+
+security:
+  - internal: []
