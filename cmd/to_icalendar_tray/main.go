@@ -12,9 +12,12 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/windows/icon.ico
+var appIcon []byte
+
 func main() {
 	// Create an instance of the app structure
-	app := NewApp()
+	app := NewApp(appIcon)
 
 	// Create tray menu
 	trayMenu := menu.NewMenu()

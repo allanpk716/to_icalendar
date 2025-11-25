@@ -10,17 +10,20 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-//go:embed build/windows/icon.ico
-var embeddedIcon []byte
+// 使用 main.go 中嵌入的图标
+// 注意：这里不再重复嵌入，避免资源重复
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx       context.Context
+	appIcon   []byte // 应用程序图标
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
-	return &App{}
+func NewApp(icon []byte) *App {
+	return &App{
+		appIcon: icon,
+	}
 }
 
 // startup is called when the app starts up.
@@ -56,8 +59,8 @@ func (a *App) setupSystemTray() {
 
 // onSystrayReady is called when the system tray is ready
 func (a *App) onSystrayReady() {
-	// Use embedded icon - no path dependencies, always available
-	systray.SetIcon(embeddedIcon)
+	// Use the same icon as the main application
+	systray.SetIcon(a.appIcon)
 	systray.SetTitle("to_icalendar")
 	systray.SetTooltip("to_icalendar - Microsoft Todo Reminders")
 

@@ -32,7 +32,7 @@ productName = "to_icalendar"
 installPath = "C:\\Program Files\\to_icalendar"
 
 [windows]
-icon = "build/appicon.png"
+icon = "build/windows/icon.ico"
 
 # 也可以尝试直接指定源文件
 # icon = "assets/icons/appicon.png"
