@@ -15,22 +15,31 @@ import (
 
 // App struct
 type App struct {
-	ctx       context.Context
-	appIcon   []byte // 应用程序图标
+	ctx            context.Context
+	appIcon        []byte // 应用程序图标
+	isWindowVisible bool   // 窗口可见状态跟踪
+	isQuitting     bool   // 退出状态跟踪
 }
 
 // NewApp creates a new App application struct
 func NewApp(icon []byte) *App {
 	return &App{
-		appIcon: icon,
+		appIcon:         icon,
+		isWindowVisible: false,
+		isQuitting:      false,
 	}
 }
 
 // startup is called when the app starts up.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// Start system tray in a goroutine
-	go a.setupSystemTray()
+	a.isWindowVisible = true
+	// Start system tray in a goroutine after a short delay to ensure Wails is ready
+	go func() {
+		// 等待一小段时间确保Wails完全初始化
+		// time.Sleep(100 * time.Millisecond)
+		a.setupSystemTray()
+	}()
 }
 
 // onDomReady is called after front-end resources have been loaded
@@ -42,14 +51,20 @@ func (a *App) onDomReady(ctx context.Context) {
 // either by clicking the window close button or calling runtime.Quit.
 // Returning true will cause the application to continue, false will continue shutdown as normal.
 func (a *App) onBeforeClose(ctx context.Context) (prevent bool) {
-	// Hide window instead of closing to keep tray running
-	a.HideWindow()
-	return true // Prevent the window from closing
+	// 如果是用户点击窗口关闭按钮且不是正在退出，隐藏到托盘
+	if !a.isQuitting {
+		a.HideWindow()
+		return true // 阻止窗口关闭，隐藏到托盘
+	}
+
+	// 如果是调用Quit()方法触发的关闭，允许正常退出
+	return false // 允许退出
 }
 
 // onShutdown is called when the application is shutting down
 func (a *App) onShutdown(ctx context.Context) {
-	// Perform your teardown here
+	// Clean shutdown - stop systray
+	systray.Quit()
 }
 
 // setupSystemTray configures the system tray icon and menu
@@ -59,7 +74,7 @@ func (a *App) setupSystemTray() {
 
 // onSystrayReady is called when the system tray is ready
 func (a *App) onSystrayReady() {
-	// Use the same icon as the main application
+	// Set icon and title
 	systray.SetIcon(a.appIcon)
 	systray.SetTitle("to_icalendar")
 	systray.SetTooltip("to_icalendar - Microsoft Todo Reminders")
@@ -96,6 +111,7 @@ func (a *App) onSystrayExit() {
 	// Clean shutdown
 }
 
+
 // Show shows the main window
 func (a *App) Show() {
 	runtime.WindowShow(a.ctx)
@@ -109,25 +125,34 @@ func (a *App) Hide() {
 // HideWindow hides the main window (alias for Hide)
 func (a *App) HideWindow() {
 	runtime.WindowHide(a.ctx)
+	a.isWindowVisible = false
 }
 
 // ShowWindow shows the main window (alias for Show)
 func (a *App) ShowWindow() {
 	runtime.WindowShow(a.ctx)
+	a.isWindowVisible = true
 }
 
 // IsWindowVisible returns whether the main window is visible
 func (a *App) IsWindowVisible() bool {
-	return a.ctx != nil
+	return a.isWindowVisible && a.ctx != nil
 }
 
 // Quit exits the application
 func (a *App) Quit() {
+	// 设置退出状态标志
+	a.isQuitting = true
+
+	// 先停止systray
+	systray.Quit()
+
+	// 然后退出Wails应用
+	runtime.Quit(a.ctx)
+
+	// 强制退出（最后手段，确保进程完全退出）
 	go func() {
-		// Give systray a moment to clean up
-		systray.Quit()
-		// Force exit after a short delay
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 		os.Exit(0)
 	}()
 }

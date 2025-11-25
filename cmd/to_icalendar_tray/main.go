@@ -4,7 +4,6 @@ import (
 	"embed"
 
 	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
@@ -19,14 +18,7 @@ func main() {
 	// Create an instance of the app structure
 	app := NewApp(appIcon)
 
-	// Create tray menu
-	trayMenu := menu.NewMenu()
-	exitItem := menu.Text("退出", nil, func(_ *menu.CallbackData) {
-		app.Quit()
-	})
-	trayMenu.Append(exitItem)
-
-	// Create application with options
+	// Create application with options - no main menu since we use systray
 	err := wails.Run(&options.App{
 		Title:  "to_icalendar",
 		Width:  800,
@@ -39,8 +31,8 @@ func main() {
 		OnDomReady:       app.onDomReady,
 		OnBeforeClose:    app.onBeforeClose,
 		OnShutdown:       app.onShutdown,
-		WindowStartState: options.Minimised, // Start minimized to tray
-		Menu:             trayMenu,
+		WindowStartState: options.Normal, // 改为Normal启动，确保窗口可见
+		// 移除Menu配置，使用systray处理托盘功能
 		Bind: []interface{}{
 			app,
 		},
