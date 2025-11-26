@@ -26,16 +26,16 @@ type CommandOptions struct {
 
 // CleanOptions 清理命令选项
 type CleanOptions struct {
-	All          bool
-	Tasks        bool
-	Images       bool
-	ImageHashes  bool
-	Temp         bool
-	Generated    bool
-	DryRun       bool
-	Force        bool
-	OlderThan    string
-	ClearAll     bool
+	All         bool
+	Tasks       bool
+	Images      bool
+	ImageHashes bool
+	Temp        bool
+	Generated   bool
+	DryRun      bool
+	Force       bool
+	OlderThan   string
+	ClearAll    bool
 }
 
 func main() {
@@ -61,7 +61,7 @@ func main() {
 	}
 
 	command := os.Args[1]
-	logger.Info("执行命令: %s", command)
+	logger.Infof("执行命令: %s", command)
 
 	// 获取服务容器
 	container := application.GetServiceContainer()
