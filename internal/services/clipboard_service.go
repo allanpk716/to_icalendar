@@ -22,64 +22,15 @@ func NewClipboardService(logger interface{}) ClipboardService {
 }
 
 // ReadContent 读取剪贴板内容
-func (cs *ClipboardServiceImpl) ReadContent(ctx context.Context) (*ClipboardContent, error) {
+func (cs *ClipboardServiceImpl) ReadContent(ctx context.Context) (*models.ClipboardContent, error) {
 	// 初始化剪贴板管理器
 	clipboardManager, err := clipboard.NewManager()
 	if err != nil {
 		return nil, fmt.Errorf("初始化剪贴板管理器失败: %w", err)
 	}
 
-	// 检查是否有内容
-	hasContent, err := clipboardManager.HasContent()
-	if err != nil {
-		return nil, fmt.Errorf("检查剪贴板内容失败: %w", err)
-	}
-
-	if !hasContent {
-		return nil, fmt.Errorf("剪贴板没有内容")
-	}
-
-	// 获取内容类型
-	contentType, err := clipboardManager.GetContentType()
-	if err != nil {
-		return nil, fmt.Errorf("获取剪贴板内容类型失败: %w", err)
-	}
-
-	// 读取内容
-	var content interface{}
-	var metadata = map[string]interface{}{
-		"content_type": contentType,
-	}
-
-	switch contentType {
-	case models.ContentTypeImage:
-		imageData, err := clipboardManager.ReadImage()
-		if err != nil {
-			return nil, fmt.Errorf("读取剪贴板图片失败: %w", err)
-		}
-		content = imageData
-		metadata["size"] = len(imageData)
-
-	case models.ContentTypeText:
-		text, err := clipboardManager.ReadText()
-		if err != nil {
-			return nil, fmt.Errorf("读取剪贴板文本失败: %w", err)
-		}
-		content = text
-		metadata["length"] = len(text)
-
-	default:
-		return nil, fmt.Errorf("不支持的剪贴板内容类型: %s", contentType)
-	}
-
-	result := &ClipboardContent{
-		Type:     string(contentType),
-		Content:  content,
-		Metadata: metadata,
-	}
-
-	logger.Info("✓ 成功读取剪贴板内容，类型: %s", contentType)
-	return result, nil
+	// 直接调用底层实现，它已经返回 models.ClipboardContent
+	return clipboardManager.Read()
 }
 
 // HasContent 检查剪贴板是否有内容
@@ -110,7 +61,7 @@ func (cs *ClipboardServiceImpl) GetContentType() (string, error) {
 }
 
 // ProcessContent 处理剪贴板内容
-func (cs *ClipboardServiceImpl) ProcessContent(ctx context.Context, content *ClipboardContent) (*models.ProcessingResult, error) {
+func (cs *ClipboardServiceImpl) ProcessContent(ctx context.Context, content *models.ClipboardContent) (*models.ProcessingResult, error) {
 	if content == nil {
 		return nil, fmt.Errorf("剪贴板内容为空")
 	}

@@ -127,10 +127,11 @@ type ParsedTaskInfo struct {
 
 // ClipboardContent represents the content read from clipboard.
 type ClipboardContent struct {
-	Type     ContentType `json:"type"`       // 内容类型
-	Text     string      `json:"text,omitempty"` // 文字内容
-	Image    []byte      `json:"image,omitempty"` // 图片数据（二进制）
-	FileName string      `json:"file_name,omitempty"` // 临时文件名
+	Type     ContentType              `json:"type"`       // 内容类型
+	Text     string                   `json:"text,omitempty"` // 文字内容
+	Image    []byte                   `json:"image,omitempty"` // 图片数据（二进制）
+	FileName string                   `json:"file_name,omitempty"` // 临时文件名
+	Metadata map[string]interface{}   `json:"metadata,omitempty"` // 元数据信息
 }
 
 // ContentType represents the type of clipboard content.

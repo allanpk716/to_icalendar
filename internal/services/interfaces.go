@@ -33,10 +33,10 @@ type CleanupService interface {
 
 // ClipboardService 剪贴板服务接口
 type ClipboardService interface {
-	ReadContent(ctx context.Context) (*ClipboardContent, error)
+	ReadContent(ctx context.Context) (*models.ClipboardContent, error)
 	HasContent() (bool, error)
 	GetContentType() (string, error)
-	ProcessContent(ctx context.Context, content *ClipboardContent) (*models.ProcessingResult, error)
+	ProcessContent(ctx context.Context, content *models.ClipboardContent) (*models.ProcessingResult, error)
 }
 
 // TodoService Microsoft Todo 服务接口
@@ -97,12 +97,6 @@ type CleanupStats struct {
 	CacheSize         int64  `json:"cache_size"`
 }
 
-// ClipboardContent 剪贴板内容
-type ClipboardContent struct {
-	Type     string      `json:"type"`
-	Content  interface{} `json:"content"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-}
 
 // ProcessClipboardResult 剪贴板处理结果
 type ProcessClipboardResult struct {

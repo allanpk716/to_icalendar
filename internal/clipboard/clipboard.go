@@ -1130,7 +1130,9 @@ func (r *WindowsClipboardReader) GetContentType() (models.ContentType, error) {
 
 // Read reads any available content from clipboard
 func (r *WindowsClipboardReader) Read() (*models.ClipboardContent, error) {
-	content := &models.ClipboardContent{}
+	content := &models.ClipboardContent{
+		Metadata: make(map[string]interface{}),
+	}
 
 	// First try to read image (consistent with HasContent and GetContentType)
 	imageData, err := r.ReadImage()
@@ -1138,6 +1140,8 @@ func (r *WindowsClipboardReader) Read() (*models.ClipboardContent, error) {
 		content.Type = models.ContentTypeImage
 		content.Image = imageData
 		content.FileName = fmt.Sprintf("clipboard_%s.png", time.Now().Format("20060102_150405"))
+		content.Metadata["size"] = len(imageData)
+		content.Metadata["format"] = "png"
 		return content, nil
 	}
 
@@ -1146,6 +1150,8 @@ func (r *WindowsClipboardReader) Read() (*models.ClipboardContent, error) {
 	if err == nil && text != "" {
 		content.Type = models.ContentTypeText
 		content.Text = text
+		content.Metadata["length"] = len(text)
+		content.Metadata["format"] = "text"
 		return content, nil
 	}
 
