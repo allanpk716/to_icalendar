@@ -8,9 +8,8 @@ import (
 
 	"github.com/allanpk716/to_icalendar/internal/app"
 	"github.com/allanpk716/to_icalendar/internal/commands"
-	"github.com/allanpk716/to_icalendar/internal/config"
 	"github.com/allanpk716/to_icalendar/internal/logger"
-	"github.com/allanpk716/to_icalendar/internal/services"
+	svcs "github.com/allanpk716/to_icalendar/internal/services"
 )
 
 const (
@@ -41,7 +40,7 @@ type CleanOptions struct {
 }
 
 func main() {
-	fmt.Printf("%s v%s - Reminder sending tool (supports Microsoft Todo)\n", appName, version)
+	logger.Infof("%s v%s - Reminder sending tool (supports Microsoft Todo)", appName, version)
 
 	// 解析命令行参数
 	if len(os.Args) < 2 {
@@ -64,8 +63,8 @@ func main() {
 	// 初始化应用
 	ctx := context.Background()
 	if err := application.Initialize(ctx); err != nil {
-		fmt.Printf("❌ 配置文件错误，请先运行 '%s init' 初始化配置\n", appName)
-		fmt.Printf("   错误详情: %v\n", err)
+		logger.Errorf("❌ 配置文件错误，请先运行 '%s init' 初始化配置", appName)
+		logger.Errorf("   错误详情: %v", err)
 		os.Exit(1)
 	}
 
@@ -77,16 +76,75 @@ func main() {
 
 	// 执行其他命令
 	switch command {
+	case "test":
+		// 直接使用 TestCommand
+		testCmd := commands.NewTestCommand(container)
+		req := &commands.CommandRequest{
+			Command: "test",
+			Args:    make(map[string]interface{}),
+		}
+		resp, err := testCmd.Execute(ctx, req)
+		if err != nil {
+			logger.Errorf("命令执行失败: %v", err)
+			os.Exit(1)
+		}
+		if !resp.Success {
+			logger.Errorf("命令执行失败: %s", resp.Error)
+			os.Exit(1)
+		}
+		testCmd.ShowTestResult(resp.Data, resp.Metadata)
+	case "clip-upload":
+		// 直接使用 ClipUploadCommand
+		clipCmd := commands.NewClipUploadCommand(container)
+		req := &commands.CommandRequest{
+			Command: "clip-upload",
+			Args:    make(map[string]interface{}),
+		}
+		resp, err := clipCmd.Execute(ctx, req)
+		if err != nil {
+			logger.Errorf("命令执行失败: %v", err)
+			os.Exit(1)
+		}
+		if !resp.Success {
+			logger.Errorf("命令执行失败: %s", resp.Error)
+			os.Exit(1)
+		}
+		clipCmd.ShowResult(resp.Data, resp.Metadata)
+	case "clean":
+		// 直接使用 CleanCommand
+		cleanCmd := commands.NewCleanCommand(container)
+		cleanOptions := parseCleanOptions(os.Args[2:])
+		req := &commands.CommandRequest{
+			Command: "clean",
+			Args: map[string]interface{}{
+				"options": &svcs.CleanupOptions{
+					All:         cleanOptions.All,
+					Tasks:       cleanOptions.Tasks,
+					Images:      cleanOptions.Images,
+					ImageHashes: cleanOptions.ImageHashes,
+					Temp:        cleanOptions.Temp,
+					Generated:   cleanOptions.Generated,
+					DryRun:      cleanOptions.DryRun,
+					Force:       cleanOptions.Force,
+					OlderThan:   cleanOptions.OlderThan,
+					ClearAll:    cleanOptions.ClearAll,
+				},
+			},
+		}
+		resp, err := cleanCmd.Execute(ctx, req)
+		if err != nil {
+			logger.Errorf("命令执行失败: %v", err)
+			os.Exit(1)
+		}
+		if !resp.Success {
+			logger.Errorf("命令执行失败: %s", resp.Error)
+			os.Exit(1)
+		}
+		cleanCmd.ShowResult(resp.Data, resp.Metadata)
 	case "upload":
 		handleUpload(container, parseCommandOptions(os.Args[2:]))
-	case "test":
-		handleTest(container)
 	case "clip":
 		handleClip(container)
-	case "clip-upload":
-		handleClipUpload(container, parseCommandOptions(os.Args[2:]))
-	case "clean":
-		handleClean(container, parseCleanOptions(os.Args[2:]))
 	case "tasks":
 		handleTasks(container, os.Args[2:])
 	case "cache":
@@ -182,32 +240,41 @@ func parseCleanOptions(args []string) CleanOptions {
 
 // handleInitDirect 独立处理 init 命令，不依赖应用初始化
 func handleInitDirect() {
-	fmt.Println("🚀 初始化配置...")
+	logger.Info("🚀 初始化配置...")
 
 	// 获取用户配置目录
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Printf("❌ 获取用户目录失败: %v\n", err)
+		logger.Errorf("❌ 获取用户目录失败: %v", err)
 		os.Exit(1)
 	}
+
+	logger.Debugf("用户目录: %s", homeDir)
 
 	configDir := filepath.Join(homeDir, ".to_icalendar")
 	serverConfigPath := filepath.Join(configDir, "server.yaml")
 
+	logger.Debugf("配置目录: %s", configDir)
+	logger.Debugf("配置文件路径: %s", serverConfigPath)
+
 	// 创建配置目录
+	logger.Debug("创建配置目录...")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
-		fmt.Printf("❌ 创建配置目录失败: %v\n", err)
+		logger.Errorf("❌ 创建配置目录失败: %v", err)
 		os.Exit(1)
 	}
+	logger.Debugf("配置目录创建成功: %s", configDir)
 
 	// 检查文件是否已存在
+	logger.Debug("检查配置文件是否已存在...")
 	if _, err := os.Stat(serverConfigPath); err == nil {
-		fmt.Printf("⚠️  配置文件已存在: %s\n", serverConfigPath)
-		fmt.Println("如需重新生成，请先删除现有配置文件")
+		logger.Warnf("⚠️  配置文件已存在: %s", serverConfigPath)
+		logger.Info("如需重新生成，请先删除现有配置文件")
 		return
 	}
 
 	// 创建默认 server.yaml 内容
+	logger.Debug("创建默认配置文件内容...")
 	serverConfigContent := `# Microsoft Todo 配置
 microsoft_todo:
   tenant_id: "YOUR_TENANT_ID"          # Azure 租户 ID
@@ -251,28 +318,30 @@ logging:
 `
 
 	// 写入配置文件
+	logger.Debug("写入配置文件...")
 	if err := os.WriteFile(serverConfigPath, []byte(serverConfigContent), 0600); err != nil {
-		fmt.Printf("❌ 创建配置文件失败: %v\n", err)
+		logger.Errorf("❌ 创建配置文件失败: %v", err)
 		os.Exit(1)
 	}
+	logger.Debugf("配置文件写入成功: %s", serverConfigPath)
 
 	// 显示成功信息
-	fmt.Println("✅ 初始化成功！")
-	fmt.Printf("📁 配置目录: %s\n", configDir)
-	fmt.Printf("⚙️  服务器配置文件: %s\n", serverConfigPath)
-	fmt.Println()
-	fmt.Println("📝 请编辑 server.yaml 文件，填写以下必要信息：")
-	fmt.Println("   - microsoft_todo.tenant_id: Azure 租户 ID")
-	fmt.Println("   - microsoft_todo.client_id: 应用程序客户端 ID")
-	fmt.Println("   - microsoft_todo.client_secret: 客户端密钥")
-	fmt.Println()
-	fmt.Println("💡 获取 Azure AD 配置信息：")
-	fmt.Println("   1. 访问 https://portal.azure.com")
-	fmt.Println("   2. 注册新应用程序或选择现有应用")
-	fmt.Println("   3. 配置 API 权限：Tasks.ReadWrite.All")
-	fmt.Println("   4. 创建客户端密钥")
-	fmt.Println()
-	fmt.Println("🎉 配置完成后，运行 'to_icalendar test' 测试连接")
+	logger.Info("✅ 初始化成功！")
+	logger.Infof("📁 配置目录: %s", configDir)
+	logger.Infof("⚙️  服务器配置文件: %s", serverConfigPath)
+	logger.Info("")
+	logger.Info("📝 请编辑 server.yaml 文件，填写以下必要信息：")
+	logger.Info("   - microsoft_todo.tenant_id: Azure 租户 ID")
+	logger.Info("   - microsoft_todo.client_id: 应用程序客户端 ID")
+	logger.Info("   - microsoft_todo.client_secret: 客户端密钥")
+	logger.Info("")
+	logger.Info("💡 获取 Azure AD 配置信息：")
+	logger.Info("   1. 访问 https://portal.azure.com")
+	logger.Info("   2. 注册新应用程序或选择现有应用")
+	logger.Info("   3. 配置 API 权限：Tasks.ReadWrite.All")
+	logger.Info("   4. 创建客户端密钥")
+	logger.Info("")
+	logger.Info("🎉 配置完成后，运行 'to_icalendar test' 测试连接")
 }
 
 // handleInit 处理初始化命令
@@ -303,247 +372,47 @@ func handleInit(container commands.ServiceContainer) {
 	initCmd.ShowSuccessMessage(resp.Metadata)
 }
 
-// handleClean 处理清理命令
-func handleClean(container commands.ServiceContainer, options CleanOptions) {
-	ctx := context.Background()
 
-	// 创建 CleanCommand
-	cleanCmd := commands.NewCleanCommand(container)
-
-	// 转换选项
-	cleanupOptions := &services.CleanupOptions{
-		All:         options.All,
-		Tasks:       options.Tasks,
-		Images:      options.Images,
-		ImageHashes: options.ImageHashes,
-		Temp:        options.Temp,
-		Generated:   options.Generated,
-		DryRun:      options.DryRun,
-		Force:       options.Force,
-		OlderThan:   options.OlderThan,
-		ClearAll:    options.ClearAll,
-	}
-
-	// 执行命令
-	req := &commands.CommandRequest{
-		Command: "clean",
-		Args: map[string]interface{}{
-			"options": cleanupOptions,
-		},
-	}
-
-	resp, err := cleanCmd.Execute(ctx, req)
-	if err != nil {
-		fmt.Printf("❌ Failed to execute clean command: %v\n", err)
-		os.Exit(1)
-	}
-
-	if !resp.Success {
-		fmt.Printf("❌ Cleanup failed: %s\n", resp.Error)
-		os.Exit(1)
-	}
-
-	// 显示结果
-	cleanCmd.ShowResult(resp.Data, resp.Metadata)
-}
-
-// handleTest 处理测试命令
-func handleTest(container commands.ServiceContainer) {
-	fmt.Println("🔍 开始系统诊断测试...")
-
-	// 1. 配置文件验证（如果失败，停止后续测试）
-	if !testConfigurationFile() {
-		return
-	}
-
-	// 2. Microsoft Todo 服务测试（如果失败，停止后续测试）
-	if !testMicrosoftTodoService(container) {
-		return
-	}
-
-	// 3. Dify 服务测试
-	if !testDifyService(container) {
-		return
-	}
-
-	// 4. 所有测试通过，显示成功信息
-	showTestSuccess()
-}
-
-// testConfigurationFile 测试配置文件
-func testConfigurationFile() bool {
-	fmt.Println("\n📋 配置文件验证")
-
-	// 获取用户配置目录
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Printf("❌ 获取用户目录失败: %v\n", err)
-		return false
-	}
-
-	configDir := filepath.Join(homeDir, ".to_icalendar")
-	serverConfigPath := filepath.Join(configDir, "server.yaml")
-
-	// 检查配置文件是否存在
-	if _, err := os.Stat(serverConfigPath); os.IsNotExist(err) {
-		fmt.Printf("❌ 配置文件不存在: %s\n", serverConfigPath)
-		fmt.Printf("💡 请先运行 '%s init' 初始化配置\n", appName)
-		return false
-	}
-	fmt.Printf("✅ 配置文件存在: %s\n", serverConfigPath)
-
-	// 创建配置管理器并加载配置
-	configManager := config.NewConfigManager()
-	config, err := configManager.LoadServerConfig(serverConfigPath)
-	if err != nil {
-		fmt.Printf("❌ 配置文件格式错误: %v\n", err)
-		return false
-	}
-	fmt.Printf("✅ YAML 格式正确\n")
-
-	// 验证必需字段
-	if config.MicrosoftTodo.TenantID == "" || config.MicrosoftTodo.ClientID == "" || config.MicrosoftTodo.ClientSecret == "" {
-		fmt.Printf("❌ Microsoft Todo 配置缺少必需字段\n")
-		return false
-	}
-	fmt.Printf("✅ 必需字段完整\n")
-
-	// 检查占位符
-	if config.MicrosoftTodo.TenantID == "YOUR_TENANT_ID" {
-		fmt.Printf("❌ TenantID 仍是占位符，请更新为实际值\n")
-		return false
-	}
-	if config.MicrosoftTodo.ClientID == "YOUR_CLIENT_ID" {
-		fmt.Printf("❌ ClientID 仍是占位符，请更新为实际值\n")
-		return false
-	}
-	if config.MicrosoftTodo.ClientSecret == "YOUR_CLIENT_SECRET" {
-		fmt.Printf("❌ ClientSecret 仍是占位符，请更新为实际值\n")
-		return false
-	}
-
-	return true
-}
-
-// testMicrosoftTodoService 测试 Microsoft Todo 服务
-func testMicrosoftTodoService(container commands.ServiceContainer) bool {
-	fmt.Println("\n🔗 Microsoft Todo 服务测试")
-
-	todoService := container.GetTodoService()
-	if err := todoService.TestConnection(); err != nil {
-		fmt.Printf("❌ Microsoft Todo 连接失败: %v\n", err)
-		return false
-	}
-
-	fmt.Printf("✅ 配置验证通过\n")
-	fmt.Printf("✅ 服务连接成功\n")
-
-	// 尝试获取服务信息
-	if _, err := todoService.GetServerInfo(); err == nil {
-		fmt.Printf("📊 服务信息：连接正常\n")
-	}
-
-	return true
-}
-
-// testDifyService 测试 Dify 服务
-func testDifyService(container commands.ServiceContainer) bool {
-	fmt.Println("\n🤖 Dify 服务测试")
-
-	// 如果 Dify 未配置，跳过测试
-	difyService := container.GetDifyService()
-	if difyService == nil {
-		fmt.Printf("⏸️ Dify 服务未配置，跳过测试\n")
-		return true
-	}
-
-	// 验证配置
-	if err := difyService.ValidateConfig(); err != nil {
-		fmt.Printf("❌ Dify 配置验证失败: %v\n", err)
-		return false
-	}
-	fmt.Printf("✅ 配置验证通过\n")
-
-	// 测试连接
-	if err := difyService.TestConnection(); err != nil {
-		fmt.Printf("❌ Dify 连接失败: %v\n", err)
-		return false
-	}
-
-	fmt.Printf("✅ API 端点连接可达\n")
-	return true
-}
-
-// showTestSuccess 显示测试成功信息
-func showTestSuccess() {
-	fmt.Println("\n📈 测试报告总结")
-	fmt.Printf("✅ 所有测试通过，系统运行正常\n")
-}
 
 // handleClip 处理剪贴板命令
 func handleClip(container commands.ServiceContainer) {
-	fmt.Println("Processing clipboard content...")
+	logger.Info("Processing clipboard content...")
 
 	clipboardService := container.GetClipboardService()
 	ctx := context.Background()
 
+	logger.Debug("读取剪贴板内容...")
 	content, err := clipboardService.ReadContent(ctx)
 	if err != nil {
-		fmt.Printf("❌ Failed to read clipboard: %v\n", err)
+		logger.Errorf("❌ Failed to read clipboard: %v", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ Successfully read clipboard content\n")
-	fmt.Printf("  Type: %s\n", content.Type)
+	logger.Infof("✓ Successfully read clipboard content")
+	logger.Infof("  Type: %s", content.Type)
+	logger.Debugf("剪贴板内容详情: %+v", content)
 }
 
-// handleClipUpload 处理剪贴板上传命令
-func handleClipUpload(container commands.ServiceContainer, options CommandOptions) {
-	ctx := context.Background()
-
-	// 创建 ClipUploadCommand
-	clipCmd := commands.NewClipUploadCommand(container)
-
-	// 执行命令
-	req := &commands.CommandRequest{
-		Command: "clip-upload",
-		Args:    make(map[string]interface{}),
-	}
-
-	resp, err := clipCmd.Execute(ctx, req)
-	if err != nil {
-		fmt.Printf("❌ Failed to execute clip-upload command: %v\n", err)
-		os.Exit(1)
-	}
-
-	if !resp.Success {
-		fmt.Printf("❌ Clip-upload failed: %s\n", resp.Error)
-		os.Exit(1)
-	}
-
-	// 显示结果
-	clipCmd.ShowResult(resp.Data, resp.Metadata)
-}
 
 // handleUpload 处理上传命令
 func handleUpload(container commands.ServiceContainer, options CommandOptions) {
-	fmt.Println("Uploading reminders...")
+	logger.Info("Uploading reminders...")
 	// 这个命令的实现保持不变，因为它不在重构范围内
-	fmt.Println("⚠️  Upload command remains unchanged in this refactoring")
+	logger.Info("⚠️  Upload command remains unchanged in this refactoring")
 }
 
 // handleTasks 处理任务管理命令
 func handleTasks(container commands.ServiceContainer, args []string) {
-	fmt.Println("Task management...")
+	logger.Info("Task management...")
 	// 这个命令的实现保持不变
-	fmt.Println("⚠️  Tasks command remains unchanged in this refactoring")
+	logger.Info("⚠️  Tasks command remains unchanged in this refactoring")
 }
 
 // handleCache 处理缓存管理命令
 func handleCache(container commands.ServiceContainer, args []string) {
-	fmt.Println("Cache management...")
+	logger.Info("Cache management...")
 	// 这个命令的实现保持不变
-	fmt.Println("⚠️  Cache command remains unchanged in this refactoring")
+	logger.Info("⚠️  Cache command remains unchanged in this refactoring")
 }
 
 // formatBytes 格式化字节数为人类可读格式
@@ -562,7 +431,7 @@ func formatBytes(bytes int64) string {
 
 // showUsage 显示使用帮助
 func showUsage() {
-	fmt.Printf(`Usage:
+	logger.Infof(`Usage:
   %s <command> [options]
 
 Commands:

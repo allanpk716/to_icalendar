@@ -140,30 +140,40 @@ func (c *ClipUploadCommand) Validate(args []string) error {
 
 // ShowResult 显示处理结果（用于CLI调用）
 func (c *ClipUploadCommand) ShowResult(data interface{}, metadata map[string]interface{}) {
+	logger.Debug("开始显示剪贴板处理结果...")
+
 	result, ok := data.(*services.ProcessClipboardResult)
 	if !ok {
-		fmt.Println("❌ 无效的结果数据")
+		logger.Error("❌ 无效的结果数据")
+		logger.Debugf("接收到的数据类型: %T, 数据内容: %+v", data)
 		return
 	}
 
+	logger.Debugf("处理结果 - 成功: %t, 标题: %s, 消息: %s", result.Success, result.Title, result.Message)
+
 	if result.Success {
-		fmt.Println("✓ 剪贴板内容处理成功")
-		fmt.Println()
-		fmt.Printf("📝 任务标题: %s\n", result.Title)
+		logger.Info("✓ 剪贴板内容处理成功")
+		logger.Info("")
+		logger.Infof("📝 任务标题: %s", result.Title)
+
 		if result.Description != "" && result.Description != result.Title {
-			fmt.Printf("📄 任务描述: %s\n", result.Description)
+			logger.Infof("📄 任务描述: %s", result.Description)
+			logger.Debugf("任务描述详情: %s", result.Description)
 		}
+
 		if result.Message != "" {
-			fmt.Printf("✅ %s\n", result.Message)
+			logger.Infof("✅ %s", result.Message)
 		}
-		fmt.Println()
+		logger.Info("")
 
 		// 显示详细的任务信息
 		if taskTitle, ok := metadata["task_title"].(string); ok && taskTitle != "" {
-			fmt.Printf("🎯 创建的任务: %s\n", taskTitle)
+			logger.Infof("🎯 创建的任务: %s", taskTitle)
+			logger.Debugf("任务标题详情: %s", taskTitle)
 		}
 		if taskList, ok := metadata["task_list"].(string); ok {
-			fmt.Printf("📋 任务列表: %s\n", taskList)
+			logger.Infof("📋 任务列表: %s", taskList)
+			logger.Debugf("任务列表详情: %s", taskList)
 		}
 		if taskPriority, ok := metadata["task_priority"].(string); ok {
 			priorityIcon := "🔵"
@@ -175,24 +185,30 @@ func (c *ClipUploadCommand) ShowResult(data interface{}, metadata map[string]int
 			case "low":
 				priorityIcon = "🟢"
 			}
-			fmt.Printf("⭐ 优先级: %s %s\n", priorityIcon, taskPriority)
+			logger.Infof("⭐ 优先级: %s %s", priorityIcon, taskPriority)
+			logger.Debugf("优先级设置: %s (图标: %s)", taskPriority, priorityIcon)
 		}
 	} else {
-		fmt.Printf("❌ 剪贴板内容处理失败: %s\n", result.Message)
-		fmt.Println("💡 请检查剪贴板内容或相关服务配置")
+		logger.Errorf("❌ 剪贴板内容处理失败: %s", result.Message)
+		logger.Info("💡 请检查剪贴板内容或相关服务配置")
+		logger.Debugf("失败详情: %+v", result)
 	}
 
-	fmt.Println()
+	logger.Info("")
 	// 显示元数据
 	if contentType, ok := metadata["content_type"].(string); ok {
-		fmt.Printf("📂 内容类型: %s\n", contentType)
+		logger.Infof("📂 内容类型: %s", contentType)
+		logger.Debugf("内容类型详情: %s", contentType)
 	}
 	if contentSize, ok := metadata["content_size"].(int); ok && contentSize > 0 {
-		fmt.Printf("📏 内容大小: %d\n", contentSize)
+		logger.Infof("📏 内容大小: %d", contentSize)
+		logger.Debugf("内容大小详情: %d bytes", contentSize)
 	}
 
-	fmt.Println("\n💡 提示:")
-	fmt.Println("  - 任务已创建到您的 Microsoft Todo")
-	fmt.Println("  - 您可以在 Microsoft Todo 应用中查看和管理此任务")
-	fmt.Println("  - 支持 AI 智能解析剪贴板内容并生成任务")
+	logger.Info("\n💡 提示:")
+	logger.Info("  - 任务已创建到您的 Microsoft Todo")
+	logger.Info("  - 您可以在 Microsoft Todo 应用中查看和管理此任务")
+	logger.Info("  - 支持 AI 智能解析剪贴板内容并生成任务")
+
+	logger.Debug("剪贴板处理结果显示完成")
 }

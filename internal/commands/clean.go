@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/allanpk716/to_icalendar/internal/logger"
 	"github.com/allanpk716/to_icalendar/internal/services"
 )
 
@@ -131,31 +132,42 @@ func (c *CleanCommand) parseOptionsFromMap(optionsMap map[string]interface{}) (*
 
 // ShowResult 显示清理结果（用于CLI调用）
 func (c *CleanCommand) ShowResult(data interface{}, metadata map[string]interface{}) {
+	logger.Debug("开始显示清理结果...")
+
 	resultData, ok := data.(map[string]interface{})
 	if !ok {
-		fmt.Println("❌ Invalid result data")
+		logger.Error("❌ Invalid result data")
+		logger.Debugf("接收到的数据类型: %T, 数据内容: %+v", data)
 		return
 	}
 
 	skipped, _ := resultData["skipped"].(bool)
 	message, _ := resultData["message"].(string)
 
+	logger.Debugf("清理结果 - 跳过: %t, 消息: %s", skipped, message)
+
 	if skipped {
-		fmt.Printf("ℹ️  %s\n", message)
+		logger.Infof("ℹ️  %s", message)
+		logger.Debug("清理操作被跳过")
 		return
 	}
 
 	totalFiles, _ := resultData["total_files"].(int64)
 	totalSize, _ := resultData["total_size"].(int64)
 
-	fmt.Printf("✅ Cleanup completed successfully\n")
-	fmt.Printf("  Total files: %d\n", totalFiles)
-	fmt.Printf("  Total size: %s\n", formatBytes(totalSize))
+	logger.Debugf("清理统计 - 文件数量: %d, 总大小: %d bytes", totalFiles, totalSize)
+
+	logger.Info("✅ Cleanup completed successfully")
+	logger.Infof("  Total files: %d", totalFiles)
+	logger.Infof("  Total size: %s", formatBytes(totalSize))
 
 	// 如果是预览模式，显示额外信息
 	if dryRun, ok := metadata["dry_run"].(bool); ok && dryRun {
-		fmt.Printf("  📋 This was a dry run - no files were actually deleted\n")
+		logger.Info("  📋 This was a dry run - no files were actually deleted")
+		logger.Debug("这是预览模式，没有实际删除文件")
 	}
+
+	logger.Debug("清理结果显示完成")
 }
 
 // formatBytes 格式化字节数为人类可读格式
