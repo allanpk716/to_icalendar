@@ -17,13 +17,6 @@ const (
 	appName = "to_icalendar"
 )
 
-// CommandOptions 命令行选项
-type CommandOptions struct {
-	ForceUpload      bool
-	NoDeduplication  bool
-	DedupStrategy    string
-	IncludeCompleted bool
-}
 
 // CleanOptions 清理命令选项
 type CleanOptions struct {
@@ -141,15 +134,7 @@ func main() {
 			os.Exit(1)
 		}
 		cleanCmd.ShowResult(resp.Data, resp.Metadata)
-	case "upload":
-		handleUpload(container, parseCommandOptions(os.Args[2:]))
-	case "clip":
-		handleClip(container)
-	case "tasks":
-		handleTasks(container, os.Args[2:])
-	case "cache":
-		handleCache(container, os.Args[2:])
-	case "help", "-h", "--help":
+		case "help", "-h", "--help":
 		showUsage()
 	default:
 		logger.Errorf("未知命令: %s", command)
@@ -161,32 +146,6 @@ func main() {
 	logger.Info("程序执行完成")
 }
 
-// parseCommandOptions 解析命令行选项
-func parseCommandOptions(args []string) CommandOptions {
-	options := CommandOptions{
-		ForceUpload:      false,
-		NoDeduplication:  false,
-		DedupStrategy:    "",
-		IncludeCompleted: false,
-	}
-
-	for i, arg := range args {
-		switch arg {
-		case "--force-upload":
-			options.ForceUpload = true
-		case "--no-deduplication":
-			options.NoDeduplication = true
-		case "--dedup-strategy":
-			if i+1 < len(args) {
-				options.DedupStrategy = args[i+1]
-			}
-		case "--include-completed":
-			options.IncludeCompleted = true
-		}
-	}
-
-	return options
-}
 
 // parseCleanOptions 解析清理命令选项
 func parseCleanOptions(args []string) CleanOptions {
@@ -374,46 +333,6 @@ func handleInit(container commands.ServiceContainer) {
 
 
 
-// handleClip 处理剪贴板命令
-func handleClip(container commands.ServiceContainer) {
-	logger.Info("Processing clipboard content...")
-
-	clipboardService := container.GetClipboardService()
-	ctx := context.Background()
-
-	logger.Debug("读取剪贴板内容...")
-	content, err := clipboardService.ReadContent(ctx)
-	if err != nil {
-		logger.Errorf("❌ Failed to read clipboard: %v", err)
-		os.Exit(1)
-	}
-
-	logger.Infof("✓ Successfully read clipboard content")
-	logger.Infof("  Type: %s", content.Type)
-	logger.Debugf("剪贴板内容详情: %+v", content)
-}
-
-
-// handleUpload 处理上传命令
-func handleUpload(container commands.ServiceContainer, options CommandOptions) {
-	logger.Info("Uploading reminders...")
-	// 这个命令的实现保持不变，因为它不在重构范围内
-	logger.Info("⚠️  Upload command remains unchanged in this refactoring")
-}
-
-// handleTasks 处理任务管理命令
-func handleTasks(container commands.ServiceContainer, args []string) {
-	logger.Info("Task management...")
-	// 这个命令的实现保持不变
-	logger.Info("⚠️  Tasks command remains unchanged in this refactoring")
-}
-
-// handleCache 处理缓存管理命令
-func handleCache(container commands.ServiceContainer, args []string) {
-	logger.Info("Cache management...")
-	// 这个命令的实现保持不变
-	logger.Info("⚠️  Cache command remains unchanged in this refactoring")
-}
 
 // formatBytes 格式化字节数为人类可读格式
 func formatBytes(bytes int64) string {
@@ -436,22 +355,12 @@ func showUsage() {
 
 Commands:
   init                    Initialize configuration files
-  upload <file>           Send reminders (supports wildcards *.json)
   test                    Test service connection
-  clip                    Process clipboard content (image or text) and generate JSON
   clip-upload             Process clipboard content and directly upload to Microsoft Todo
   clean                   Clean cache files
-  tasks                   Task management commands (list, show, clean)
-  cache                   Cache management commands (stats, cleanup)
   help                    Show this help message
 
 Options:
-  Upload command:
-    --force-upload          Force upload even if duplicates are found
-    --no-deduplication      Disable deduplication checking
-    --dedup-strategy <s>    Set deduplication strategy (exact/similar) [not yet implemented]
-    --include-completed     Include completed tasks in duplicate check
-
   Clean command:
     --all                   Clean all cache types (default)
     --tasks                 Clean task deduplication cache only
@@ -466,7 +375,8 @@ Options:
 
 Examples:
   %s init                                          # Initialize configuration
-  %s upload reminder.json                         # Send single reminder
+  %s test                                          # Test connection
+  %s clip-upload                                   # Process clipboard and upload
   %s clean --all                                   # Clean all cache
   %s clean --dry-run                               # Preview files to be cleaned
 
@@ -475,5 +385,5 @@ Configuration files:
   ~/.to_icalendar/reminder.json     Reminder template
 
 For more information, see README.md
-`, appName, appName, appName, appName)
+`, appName, appName, appName, appName, appName)
 }
