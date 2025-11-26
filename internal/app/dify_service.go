@@ -126,3 +126,21 @@ func (ds *DifyServiceImpl) ValidateConfig() error {
 
 	return ds.config.Dify.Validate()
 }
+
+// TestConnection 测试 Dify 服务连接
+func (ds *DifyServiceImpl) TestConnection() error {
+	// 1. 配置验证
+	if err := ds.ValidateConfig(); err != nil {
+		return err
+	}
+
+	// 2. 创建客户端并发送 HTTP HEAD 请求检查API端点可达性
+	difyClient := dify.NewDifyClient(&ds.config.Dify)
+
+	// 使用客户端的验证方法测试连接
+	if err := difyClient.ValidateConfig(); err != nil {
+		return fmt.Errorf("Dify API 连接测试失败: %w", err)
+	}
+
+	return nil
+}

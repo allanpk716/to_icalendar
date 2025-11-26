@@ -363,6 +363,25 @@ func (c *Client) ValidateConfig() error {
 	if c.apiKey == "" {
 		return fmt.Errorf("Dify API key is required")
 	}
+
+	// 测试 API 端点的连通性
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 发送 HEAD 请求测试端点可达性
+	resp, err := c.httpClient.R().
+		SetContext(ctx).
+		Head(c.apiEndpoint)
+
+	if err != nil {
+		return fmt.Errorf("无法连接到 Dify API 端点 %s: %w", c.apiEndpoint, err)
+	}
+
+	// 检查响应状态码，允许 2xx 和 404（可能不支持 HEAD 方法）
+	if resp.StatusCode() >= 300 && resp.StatusCode() != 404 {
+		return fmt.Errorf("Dify API 端点返回错误状态码: %d", resp.StatusCode())
+	}
+
 	return nil
 }
 

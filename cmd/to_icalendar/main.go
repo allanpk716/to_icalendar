@@ -8,6 +8,7 @@ import (
 
 	"github.com/allanpk716/to_icalendar/internal/app"
 	"github.com/allanpk716/to_icalendar/internal/commands"
+	"github.com/allanpk716/to_icalendar/internal/config"
 	"github.com/allanpk716/to_icalendar/internal/logger"
 	"github.com/allanpk716/to_icalendar/internal/services"
 )
@@ -348,15 +349,135 @@ func handleClean(container commands.ServiceContainer, options CleanOptions) {
 
 // handleTest 处理测试命令
 func handleTest(container commands.ServiceContainer) {
-	fmt.Println("Testing service connections...")
+	fmt.Println("🔍 开始系统诊断测试...")
+
+	// 1. 配置文件验证（如果失败，停止后续测试）
+	if !testConfigurationFile() {
+		return
+	}
+
+	// 2. Microsoft Todo 服务测试（如果失败，停止后续测试）
+	if !testMicrosoftTodoService(container) {
+		return
+	}
+
+	// 3. Dify 服务测试
+	if !testDifyService(container) {
+		return
+	}
+
+	// 4. 所有测试通过，显示成功信息
+	showTestSuccess()
+}
+
+// testConfigurationFile 测试配置文件
+func testConfigurationFile() bool {
+	fmt.Println("\n📋 配置文件验证")
+
+	// 获取用户配置目录
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("❌ 获取用户目录失败: %v\n", err)
+		return false
+	}
+
+	configDir := filepath.Join(homeDir, ".to_icalendar")
+	serverConfigPath := filepath.Join(configDir, "server.yaml")
+
+	// 检查配置文件是否存在
+	if _, err := os.Stat(serverConfigPath); os.IsNotExist(err) {
+		fmt.Printf("❌ 配置文件不存在: %s\n", serverConfigPath)
+		fmt.Printf("💡 请先运行 '%s init' 初始化配置\n", appName)
+		return false
+	}
+	fmt.Printf("✅ 配置文件存在: %s\n", serverConfigPath)
+
+	// 创建配置管理器并加载配置
+	configManager := config.NewConfigManager()
+	config, err := configManager.LoadServerConfig(serverConfigPath)
+	if err != nil {
+		fmt.Printf("❌ 配置文件格式错误: %v\n", err)
+		return false
+	}
+	fmt.Printf("✅ YAML 格式正确\n")
+
+	// 验证必需字段
+	if config.MicrosoftTodo.TenantID == "" || config.MicrosoftTodo.ClientID == "" || config.MicrosoftTodo.ClientSecret == "" {
+		fmt.Printf("❌ Microsoft Todo 配置缺少必需字段\n")
+		return false
+	}
+	fmt.Printf("✅ 必需字段完整\n")
+
+	// 检查占位符
+	if config.MicrosoftTodo.TenantID == "YOUR_TENANT_ID" {
+		fmt.Printf("❌ TenantID 仍是占位符，请更新为实际值\n")
+		return false
+	}
+	if config.MicrosoftTodo.ClientID == "YOUR_CLIENT_ID" {
+		fmt.Printf("❌ ClientID 仍是占位符，请更新为实际值\n")
+		return false
+	}
+	if config.MicrosoftTodo.ClientSecret == "YOUR_CLIENT_SECRET" {
+		fmt.Printf("❌ ClientSecret 仍是占位符，请更新为实际值\n")
+		return false
+	}
+
+	return true
+}
+
+// testMicrosoftTodoService 测试 Microsoft Todo 服务
+func testMicrosoftTodoService(container commands.ServiceContainer) bool {
+	fmt.Println("\n🔗 Microsoft Todo 服务测试")
 
 	todoService := container.GetTodoService()
 	if err := todoService.TestConnection(); err != nil {
-		fmt.Printf("❌ Microsoft Todo connection test failed: %v\n", err)
-		os.Exit(1)
+		fmt.Printf("❌ Microsoft Todo 连接失败: %v\n", err)
+		return false
 	}
 
-	fmt.Println("✅ Microsoft Todo connection successful")
+	fmt.Printf("✅ 配置验证通过\n")
+	fmt.Printf("✅ 服务连接成功\n")
+
+	// 尝试获取服务信息
+	if _, err := todoService.GetServerInfo(); err == nil {
+		fmt.Printf("📊 服务信息：连接正常\n")
+	}
+
+	return true
+}
+
+// testDifyService 测试 Dify 服务
+func testDifyService(container commands.ServiceContainer) bool {
+	fmt.Println("\n🤖 Dify 服务测试")
+
+	// 如果 Dify 未配置，跳过测试
+	difyService := container.GetDifyService()
+	if difyService == nil {
+		fmt.Printf("⏸️ Dify 服务未配置，跳过测试\n")
+		return true
+	}
+
+	// 验证配置
+	if err := difyService.ValidateConfig(); err != nil {
+		fmt.Printf("❌ Dify 配置验证失败: %v\n", err)
+		return false
+	}
+	fmt.Printf("✅ 配置验证通过\n")
+
+	// 测试连接
+	if err := difyService.TestConnection(); err != nil {
+		fmt.Printf("❌ Dify 连接失败: %v\n", err)
+		return false
+	}
+
+	fmt.Printf("✅ API 端点连接可达\n")
+	return true
+}
+
+// showTestSuccess 显示测试成功信息
+func showTestSuccess() {
+	fmt.Println("\n📈 测试报告总结")
+	fmt.Printf("✅ 所有测试通过，系统运行正常\n")
 }
 
 // handleClip 处理剪贴板命令

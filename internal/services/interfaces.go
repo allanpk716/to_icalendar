@@ -51,6 +51,7 @@ type DifyService interface {
 	ProcessText(ctx context.Context, text string) (*models.DifyResponse, error)
 	ProcessImage(ctx context.Context, imageData []byte) (*models.DifyResponse, error)
 	ValidateConfig() error
+	TestConnection() error
 }
 
 // 结果类型定义
