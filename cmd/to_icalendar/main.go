@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/allanpk716/to_icalendar/internal/app"
 	"github.com/allanpk716/to_icalendar/internal/commands"
@@ -41,19 +42,6 @@ type CleanOptions struct {
 func main() {
 	fmt.Printf("%s v%s - Reminder sending tool (supports Microsoft Todo)\n", appName, version)
 
-	// 创建应用实例
-	application := app.NewApplication()
-
-	// 初始化应用
-	ctx := context.Background()
-	if err := application.Initialize(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize application: %v\n", err)
-		os.Exit(1)
-	}
-
-	// 确保应用在退出时正确关闭
-	defer application.Shutdown(ctx)
-
 	// 解析命令行参数
 	if len(os.Args) < 2 {
 		showUsage()
@@ -63,13 +51,31 @@ func main() {
 	command := os.Args[1]
 	logger.Infof("执行命令: %s", command)
 
+	// init 命令使用独立处理路径
+	if command == "init" {
+		handleInitDirect()
+		return
+	}
+
+	// 创建应用实例（其他命令需要完整初始化）
+	application := app.NewApplication()
+
+	// 初始化应用
+	ctx := context.Background()
+	if err := application.Initialize(ctx); err != nil {
+		fmt.Printf("❌ 配置文件错误，请先运行 '%s init' 初始化配置\n", appName)
+		fmt.Printf("   错误详情: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 确保应用在退出时正确关闭
+	defer application.Shutdown(ctx)
+
 	// 获取服务容器
 	container := application.GetServiceContainer()
 
-	// 执行命令
+	// 执行其他命令
 	switch command {
-	case "init":
-		handleInit(container)
 	case "upload":
 		handleUpload(container, parseCommandOptions(os.Args[2:]))
 	case "test":
@@ -171,6 +177,101 @@ func parseCleanOptions(args []string) CleanOptions {
 	}
 
 	return options
+}
+
+// handleInitDirect 独立处理 init 命令，不依赖应用初始化
+func handleInitDirect() {
+	fmt.Println("🚀 初始化配置...")
+
+	// 获取用户配置目录
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("❌ 获取用户目录失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	configDir := filepath.Join(homeDir, ".to_icalendar")
+	serverConfigPath := filepath.Join(configDir, "server.yaml")
+
+	// 创建配置目录
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		fmt.Printf("❌ 创建配置目录失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 检查文件是否已存在
+	if _, err := os.Stat(serverConfigPath); err == nil {
+		fmt.Printf("⚠️  配置文件已存在: %s\n", serverConfigPath)
+		fmt.Println("如需重新生成，请先删除现有配置文件")
+		return
+	}
+
+	// 创建默认 server.yaml 内容
+	serverConfigContent := `# Microsoft Todo 配置
+microsoft_todo:
+  tenant_id: "YOUR_TENANT_ID"          # Azure 租户 ID
+  client_id: "YOUR_CLIENT_ID"        # 应用程序客户端 ID
+  client_secret: "YOUR_CLIENT_SECRET"  # 客户端密钥
+  user_email: ""                     # 目标用户邮箱（可选）
+  timezone: "Asia/Shanghai"          # 时区设置
+
+# 提醒配置
+reminder:
+  default_remind_before: "15m"       # 默认提前提醒时间
+  enable_smart_reminder: true        # 启用智能提醒功能
+
+# 去重配置
+deduplication:
+  enabled: true                      # 启用去重功能
+  time_window_minutes: 5              # 时间匹配窗口（分钟）
+  similarity_threshold: 80            # 相似度阈值（0-100）
+  check_incomplete_only: true         # 只检查未完成的任务
+  enable_local_cache: true            # 启用本地缓存
+  enable_remote_query: true           # 启用远程查询
+
+# Dify AI 配置（可选）
+dify:
+  api_endpoint: ""                   # Dify API 端点
+  api_key: ""                        # Dify API 密钥
+  timeout: 60                        # 请求超时时间（秒）
+
+# 缓存配置
+cache:
+  auto_cleanup_days: 30              # 自动清理天数
+  cleanup_on_startup: true           # 启动时清理
+  preserve_successful_hashes: true   # 保留成功哈希记录
+
+# 日志配置
+logging:
+  level: "info"                      # 日志级别
+  console_output: true               # 控制台输出
+  file_output: true                  # 文件输出
+  log_dir: "./Logs"                  # 日志目录
+`
+
+	// 写入配置文件
+	if err := os.WriteFile(serverConfigPath, []byte(serverConfigContent), 0600); err != nil {
+		fmt.Printf("❌ 创建配置文件失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 显示成功信息
+	fmt.Println("✅ 初始化成功！")
+	fmt.Printf("📁 配置目录: %s\n", configDir)
+	fmt.Printf("⚙️  服务器配置文件: %s\n", serverConfigPath)
+	fmt.Println()
+	fmt.Println("📝 请编辑 server.yaml 文件，填写以下必要信息：")
+	fmt.Println("   - microsoft_todo.tenant_id: Azure 租户 ID")
+	fmt.Println("   - microsoft_todo.client_id: 应用程序客户端 ID")
+	fmt.Println("   - microsoft_todo.client_secret: 客户端密钥")
+	fmt.Println()
+	fmt.Println("💡 获取 Azure AD 配置信息：")
+	fmt.Println("   1. 访问 https://portal.azure.com")
+	fmt.Println("   2. 注册新应用程序或选择现有应用")
+	fmt.Println("   3. 配置 API 权限：Tasks.ReadWrite.All")
+	fmt.Println("   4. 创建客户端密钥")
+	fmt.Println()
+	fmt.Println("🎉 配置完成后，运行 'to_icalendar test' 测试连接")
 }
 
 // handleInit 处理初始化命令
