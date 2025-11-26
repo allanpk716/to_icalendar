@@ -1,6 +1,9 @@
 package logger
 
 import (
+	"log"
+	"os"
+
 	"github.com/WQGroup/logger"
 	"github.com/sirupsen/logrus"
 	"github.com/allanpk716/to_icalendar/internal/models"
@@ -207,4 +210,15 @@ func Fatalf(format string, args ...interface{}) {
 func Initialize(config *models.LoggingConfig) error {
 	instance = NewManager(config)
 	return instance.Initialize()
+}
+
+// GetLogger 获取日志管理器实例（为了兼容性）
+func GetLogger() *Manager {
+	return GetInstance()
+}
+
+// GetStdLogger 获取标准库 logger（为了兼容性）
+func (m *Manager) GetStdLogger() *log.Logger {
+	// 返回一个简单的标准 logger，实际日志会通过我们的管理器处理
+	return log.New(os.Stdout, "[to_icalendar] ", log.LstdFlags)
 }

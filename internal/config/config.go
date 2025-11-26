@@ -256,8 +256,13 @@ func (cm *ConfigManager) CreateReminderTemplate(reminderPath string) error {
 		List:         "工作",
 	}
 
+	return cm.SaveReminderTemplate(reminderPath, &template)
+}
+
+// SaveReminderTemplate 保存提醒事项模板文件
+func (cm *ConfigManager) SaveReminderTemplate(reminderPath string, reminder *models.Reminder) error {
 	// 序列化为JSON
-	data, err := json.MarshalIndent(template, "", "  ")
+	data, err := json.MarshalIndent(reminder, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal reminder template: %w", err)
 	}
