@@ -1,220 +1,195 @@
 import './style.css';
 import './app.css';
 
-import logo from './assets/images/logo-universal.png';
-import { Show, Hide, IsWindowVisible, Quit, InitConfigWithStreaming } from '../wailsjs/go/main/App';
+import { Show, Hide, IsWindowVisible, Quit } from '../wailsjs/go/main/App';
 
-document.querySelector('#app').innerHTML = `
-    <div class="container">
-        <h1 class="app-title">to_icalendar 系统托盘</h1>
+// 导入组件和模块
+import { appState, TABS } from './state.js';
+import { TabNavigation } from './components/tab-navigation.js';
+import { StatusBar } from './components/status-bar.js';
+import { LogPanel } from './components/log-panel.js';
+import { InitModule } from './modules/init.js';
+import { TestModule } from './modules/test.js';
+import { ClipboardModule } from './modules/clipboard.js';
+import { CleanModule } from './modules/clean.js';
 
-        <!-- 状态显示 -->
-        <div class="status" id="status">应用程序正在运行...</div>
-
-        <!-- 初始化区域 -->
-        <div class="init-section" id="initSection">
-            <h3>配置初始化</h3>
-            <p>首次使用需要初始化配置文件以连接 Microsoft Todo 服务</p>
-            <button class="btn btn-primary" id="initBtn" onclick="initConfig()">
-                初始化配置文件
-            </button>
-        </div>
-
-        <!-- 日志显示区域 -->
-        <div class="log-section" id="logSection" style="display: none;">
-            <h3>初始化日志</h3>
-            <div class="log-container" id="logContainer"></div>
-            <div class="result-section" id="resultSection" style="display: none;">
-                <h4>初始化结果</h4>
-                <div id="resultContent"></div>
-            </div>
-        </div>
-
-        <!-- 控制按钮 -->
-        <div class="controls">
-            <button class="btn" id="showBtn" onclick="showWindow()">显示窗口</button>
-            <button class="btn" id="hideBtn" onclick="hideWindow()">隐藏到托盘</button>
-            <button class="btn btn-danger" id="quitBtn" onclick="quitApp()">退出应用</button>
-        </div>
-    </div>
-`;
-
-// Logo已移除，界面更加简洁
-
-let statusElement = document.getElementById("status");
-let showBtn = document.getElementById("showBtn");
-let hideBtn = document.getElementById("hideBtn");
-let quitBtn = document.getElementById("quitBtn");
-
-// 初始化界面
-async function initializeUI() {
-    try {
-        const isVisible = await IsWindowVisible();
-        updateUIState(isVisible);
-        statusElement.textContent = "应用程序已启动，托盘功能正常运行";
-    } catch (err) {
-        console.error("初始化失败:", err);
-        statusElement.textContent = "初始化失败: " + err;
+// 应用主类
+class ToICalendarApp {
+    constructor() {
+        this.tabNavigation = null;
+        this.statusBar = null;
+        this.logPanel = null;
+        this.modules = {};
+        this.isInitialized = false;
     }
-}
 
-// 更新UI状态
-function updateUIState(isVisible) {
-    if (isVisible) {
-        showBtn.disabled = true;
-        hideBtn.disabled = false;
-        statusElement.textContent = "窗口可见";
-    } else {
-        showBtn.disabled = false;
-        hideBtn.disabled = true;
-        statusElement.textContent = "窗口已隐藏到托盘";
-    }
-}
-
-// 显示窗口
-window.showWindow = async function () {
-    try {
-        await Show();
-        updateUIState(true);
-        statusElement.textContent = "窗口已显示";
-    } catch (err) {
-        console.error("显示窗口失败:", err);
-        statusElement.textContent = "显示窗口失败: " + err;
-    }
-};
-
-// 隐藏窗口
-window.hideWindow = async function () {
-    try {
-        await Hide();
-        updateUIState(false);
-        statusElement.textContent = "窗口已隐藏到托盘";
-    } catch (err) {
-        console.error("隐藏窗口失败:", err);
-        statusElement.textContent = "隐藏窗口失败: " + err;
-    }
-};
-
-// 退出应用
-window.quitApp = async function () {
-    if (confirm("确定要退出应用程序吗？")) {
+    async init() {
         try {
-            statusElement.textContent = "正在退出应用程序...";
-            await Quit();
-        } catch (err) {
-            console.error("退出应用失败:", err);
-            statusElement.textContent = "退出应用失败: " + err;
+            this.render();
+            this.setupComponents();
+            this.bindEvents();
+            this.setupStateListeners();
+
+            // 初始化窗口状态
+            await this.initializeWindow();
+
+            // 检查配置状态
+            await this.checkConfiguration();
+
+            this.isInitialized = true;
+            console.log('to_icalendar 应用初始化完成');
+
+        } catch (error) {
+            console.error('应用初始化失败:', error);
+            this.showError('应用初始化失败', error.message);
         }
     }
-};
 
-// 添加初始化相关变量
-let isInitializing = false;
+    render() {
+        document.querySelector('#app').innerHTML = `
+            <div class="app-container">
+                <!-- 标签导航 -->
+                <div class="tab-navigation-container" id="tabNavigation"></div>
 
-// 初始化配置
-window.initConfig = async function () {
-    if (isInitializing) return;
+                <!-- 状态栏 -->
+                <div class="status-bar-container" id="statusBar"></div>
 
-    try {
-        isInitializing = true;
-        const initBtn = document.getElementById('initBtn');
-        initBtn.disabled = true;
-        initBtn.textContent = '正在初始化...';
-
-        // 显示日志区域
-        document.getElementById('logSection').style.display = 'block';
-
-        // 清空现有内容
-        document.getElementById('logContainer').innerHTML = '';
-        document.getElementById('resultSection').style.display = 'none';
-
-        // 滚动到日志区域
-        document.getElementById('logSection').scrollIntoView({ behavior: 'smooth' });
-
-        // 调用后端初始化方法
-        await InitConfigWithStreaming();
-
-    } catch (err) {
-        appendLog('error', `初始化异常: ${err}`);
-        // 重置按钮状态
-        resetInitButton();
-    }
-};
-
-// 重置初始化按钮状态
-function resetInitButton() {
-    const initBtn = document.getElementById('initBtn');
-    initBtn.disabled = false;
-    initBtn.textContent = '初始化配置文件';
-    isInitializing = false;
-}
-
-// 添加日志到显示区域
-function appendLog(type, message) {
-    const logContainer = document.getElementById('logContainer');
-    const logEntry = document.createElement('div');
-    logEntry.className = `log-entry log-${type}`;
-
-    const timestamp = new Date().toLocaleTimeString();
-    logEntry.innerHTML = `<span class="log-time">[${timestamp}]</span> ${message}`;
-
-    logContainer.appendChild(logEntry);
-    logContainer.scrollTop = logContainer.scrollHeight;
-}
-
-// 显示初始化结果
-function showResult(result) {
-    const resultSection = document.getElementById('resultSection');
-    const resultContent = document.getElementById('resultContent');
-
-    if (result.success) {
-        resultContent.innerHTML = `
-            <div class="result-success">
-                <p>✅ ${result.message}</p>
-                <p><strong>配置目录:</strong> ${result.configDir}</p>
-                <p><strong>配置文件:</strong> ${result.serverConfig}</p>
-                <div class="next-steps">
-                    <h4>下一步操作:</h4>
-                    <ol>
-                        <li>编辑 server.yaml 文件，配置 Microsoft Todo 信息</li>
-                        <li>获取 Azure AD 租户 ID、客户端 ID 和密钥</li>
-                        <li>配置完成后运行测试连接验证</li>
-                    </ol>
+                <!-- 模块内容区域 -->
+                <div class="module-content-area" id="moduleContent">
+                    <!-- 模块内容将在这里动态加载 -->
                 </div>
-            </div>
-        `;
-    } else {
-        resultContent.innerHTML = `
-            <div class="result-error">
-                <p>❌ ${result.message}</p>
+
+                <!-- 日志面板 -->
+                <div class="log-panel-container" id="logPanel"></div>
             </div>
         `;
     }
 
-    resultSection.style.display = 'block';
-    resultSection.scrollIntoView({ behavior: 'smooth' });
+    setupComponents() {
+        // 初始化组件
+        const tabNavContainer = document.getElementById('tabNavigation');
+        const statusBarContainer = document.getElementById('statusBar');
+        const logPanelContainer = document.getElementById('logPanel');
+        const moduleContentArea = document.getElementById('moduleContent');
+
+        this.tabNavigation = new TabNavigation(tabNavContainer);
+        this.statusBar = new StatusBar(statusBarContainer);
+        this.logPanel = new LogPanel(logPanelContainer);
+
+        // 初始化模块
+        this.modules = {
+            [TABS.INIT]: new InitModule(moduleContentArea, this.logPanel, this.statusBar),
+            [TABS.TEST]: new TestModule(moduleContentArea, this.logPanel, this.statusBar),
+            [TABS.CLIPBOARD]: new ClipboardModule(moduleContentArea, this.logPanel, this.statusBar),
+            [TABS.CLEAN]: new CleanModule(moduleContentArea, this.logPanel, this.statusBar)
+        };
+
+        // 默认显示剪贴板模块
+        this.showModule(TABS.CLIPBOARD);
+    }
+
+    bindEvents() {
+        // 标签切换事件
+        this.tabNavigation.container.addEventListener('tabchange', (e) => {
+            this.showModule(e.detail.tabId);
+        });
+
+        // 模块切换到其他标签的事件
+        Object.values(this.modules).forEach(module => {
+            if (module.container) {
+                module.container.addEventListener('switchTab', (e) => {
+                    this.tabNavigation.switchTab(e.detail.tabId);
+                });
+            }
+        });
+    }
+
+    setupStateListeners() {
+        // 监听应用状态变化
+        appState.subscribe('currentTab', (tabId) => {
+            this.showModule(tabId);
+        });
+    }
+
+    showModule(tabId) {
+        // 隐藏所有模块
+        Object.values(this.modules).forEach(module => {
+            if (module.container) {
+                module.container.style.display = 'none';
+            }
+        });
+
+        // 显示选中的模块
+        const module = this.modules[tabId];
+        if (module && module.container) {
+            module.container.style.display = 'block';
+        }
+
+        // 更新状态栏
+        this.statusBar.showMessage(`当前模块: ${this.getModuleDisplayName(tabId)}`);
+    }
+
+    getModuleDisplayName(tabId) {
+        const names = {
+            [TABS.INIT]: '配置初始化',
+            [TABS.TEST]: '系统测试',
+            [TABS.CLIPBOARD]: '剪贴板处理',
+            [TABS.CLEAN]: '缓存清理'
+        };
+        return names[tabId] || tabId;
+    }
+
+    async initializeWindow() {
+        try {
+            // 窗口控制功能已移除，不需要检查窗口状态
+            console.log('应用窗口初始化完成');
+        } catch (error) {
+            console.error('初始化窗口状态失败:', error);
+        }
+    }
+
+    async checkConfiguration() {
+        try {
+            // 检查配置状态，可能需要调整默认标签
+            const configStatus = await this.checkConfigFileStatus();
+
+            if (!configStatus.exists) {
+                // 如果配置不存在，默认显示初始化标签
+                this.tabNavigation.switchTab(TABS.INIT);
+            }
+        } catch (error) {
+            console.log('检查配置状态失败，使用默认设置:', error);
+        }
+    }
+
+    async checkConfigFileStatus() {
+        // 这里可以调用后端API检查配置文件状态
+        // 暂时返回存在状态，让默认显示剪贴板标签
+        return { exists: true, valid: true };
+    }
+
+    showError(title, message) {
+        console.error(title, message);
+        document.body.innerHTML = `
+            <div class="error-screen">
+                <h1>❌ ${title}</h1>
+                <p>${message}</p>
+                <button onclick="location.reload()">重新加载应用</button>
+            </div>
+        `;
+    }
 }
+
+// 创建应用实例
+const app = new ToICalendarApp();
 
 // 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', initializeUI);
-
-// 定期检查窗口状态
-setInterval(async () => {
-    try {
-        const isVisible = await IsWindowVisible();
-        updateUIState(isVisible);
-    } catch (err) {
-        // 忽略定期检查的错误，避免控制台噪音
-    }
-}, 2000); // 每2秒检查一次
-
-// 事件监听器 - 监听后端日志
-runtime.EventsOn("initLog", (logMessage) => {
-    appendLog(logMessage.type, logMessage.message);
+document.addEventListener('DOMContentLoaded', () => {
+    app.init();
 });
 
-// 事件监听器 - 监听初始化结果
-runtime.EventsOn("initResult", (result) => {
-    resetInitButton();
-    showResult(result);
-});
+// 将必要的函数暴露到全局作用域（向后兼容）
+// 窗口控制功能已移除
+
+// 导出应用实例
+export default app;
