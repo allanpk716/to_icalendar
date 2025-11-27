@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/internal/logger"
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/allanpk716/to_icalendar/internal/services"
@@ -53,17 +54,34 @@ func (ts *TodoServiceImpl) CreateTask(ctx context.Context, reminder *models.Remi
 		return fmt.Errorf("创建 Microsoft Todo 客户端失败: %w", err)
 	}
 
-	// 解析时间和优先级
-	dueDateTime, err := parseReminderDateTime(reminder.Date, reminder.Time)
-	if err != nil {
-		return fmt.Errorf("解析日期时间失败: %w", err)
+	// 恢复工作版本的完整时区处理逻辑
+	var timezone *time.Location
+	if ts.config.MicrosoftTodo.Timezone != "" {
+		timezone, err = time.LoadLocation(ts.config.MicrosoftTodo.Timezone)
+		if err != nil {
+			logger.Warnf("无法加载配置的时区 %s: %v, 使用本地时区", ts.config.MicrosoftTodo.Timezone, err)
+			timezone = time.Local
+		}
+	} else {
+		timezone = time.Local
 	}
 
-	reminderTime, err := parseReminderBeforeTime(reminder.RemindBefore)
-	if err != nil {
-		// 如果解析失败，使用默认提醒时间
-		reminderTime = time.Time{}
+	// 使用工作版本的完整时间解析函数
+	parsedReminder, parseErr := models.ParseReminderTimeWithConfig(*reminder, timezone, &ts.config.Reminder)
+	if parseErr != nil {
+		return fmt.Errorf("完整时间解析失败: %w", parseErr)
 	}
+
+	// 从解析结果中提取时间信息
+	dueDateTime := parsedReminder.DueTime
+	reminderTime := parsedReminder.AlarmTime
+
+	// 添加详细的时间处理调试日志
+	logger.Infof("完整时间处理流程:")
+	logger.Infof("  输入提醒: %+v", reminder)
+	logger.Infof("  时区: %s", timezone.String())
+	logger.Infof("  解析后截止时间: %s", parsedReminder.DueTime.Format(time.RFC3339))
+	logger.Infof("  解析后提醒时间: %s", parsedReminder.AlarmTime.Format(time.RFC3339))
 
 	importance := 1 // 默认重要性
 
@@ -170,75 +188,6 @@ func (ts *TodoServiceImpl) GetServerInfo() (map[string]interface{}, error) {
 	return todoClient.GetServerInfo()
 }
 
-// parseReminderDateTime 解析提醒日期时间
-func parseReminderDateTime(dateStr, timeStr string) (time.Time, error) {
-	if dateStr == "" {
-		return time.Time{}, fmt.Errorf("日期为空")
-	}
-
-	// 组合日期和时间
-	var datetimeStr string
-	if timeStr != "" {
-		datetimeStr = fmt.Sprintf("%s %s", dateStr, timeStr)
-	} else {
-		datetimeStr = dateStr
-	}
-
-	// 尝试常见的时间格式
-	formats := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04",
-		"2006-01-02",
-	}
-
-	for _, format := range formats {
-		if t, err := time.Parse(format, datetimeStr); err == nil {
-			return t, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("无法解析日期时间格式: %s", datetimeStr)
-}
-
-// parseReminderBeforeTime 解析提前提醒时间
-func parseReminderBeforeTime(remindBefore string) (time.Time, error) {
-	if remindBefore == "" {
-		return time.Time{}, nil
-	}
-
-	// 简单的时间解析，支持 m/h/d 后缀
-	if len(remindBefore) < 2 {
-		return time.Time{}, fmt.Errorf("无效的提醒时间格式: %s", remindBefore)
-	}
-
-	durationStr := remindBefore[:len(remindBefore)-1]
-	unit := remindBefore[len(remindBefore)-1]
-
-	var duration time.Duration
-	switch unit {
-	case 'm', 'M':
-		// 分钟
-		if minutes, err := time.ParseDuration(durationStr + "m"); err == nil {
-			duration = minutes
-		}
-	case 'h', 'H':
-		// 小时
-		if hours, err := time.ParseDuration(durationStr + "h"); err == nil {
-			duration = hours
-		}
-	case 'd', 'D':
-		// 天
-		if days, err := time.ParseDuration(durationStr + "d"); err == nil {
-			duration = days
-		}
-	default:
-		return time.Time{}, fmt.Errorf("不支持的时间单位: %c", unit)
-	}
-
-	if duration <= 0 {
-		return time.Time{}, fmt.Errorf("无效的提醒时间: %s", remindBefore)
-	}
-
-	// 返回当前时间减去提前时间（这表示要在指定时间之前提醒）
-	return time.Now().Add(-duration), nil
-}
+// 注意：parseReminderDateTime 和 parseReminderBeforeTime 函数已被移除
+// 现在使用 models.ParseReminderTimeWithConfig 进行完整的时间解析
+// 这提供了更好的时区处理、智能提醒功能和错误处理

@@ -728,12 +728,17 @@ func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID stri
 
 	// 设置提醒时间
 	if !reminderTime.IsZero() {
-		// 直接使用本地时间，不进行时区转换
-		// Microsoft Graph API 会根据提供的 timeZone 字段正确处理时区
+		// 在调用Microsoft Graph API前验证时间参数
+		formattedTime := reminderTime.Format(time.RFC3339)
+		logger.Infof("将发送提醒时间: %s (时区: %s)", formattedTime, timezone)
+
+		// 使用RFC3339格式，这是Microsoft Graph API的标准格式
 		newTask["reminderDateTime"] = map[string]interface{}{
-			"dateTime": reminderTime.Local().Format("2006-01-02T15:04:05"),
+			"dateTime": formattedTime,
 			"timeZone": timezone,
 		}
+	} else {
+		logger.Warnf("提醒时间为空，Microsoft Todo不会创建提醒")
 	}
 
 	// 设置重要性

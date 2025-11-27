@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/models"
 )
@@ -321,39 +323,54 @@ func (p *ResponseParserImpl) isValidTimeFormat(timeStr string) bool {
 	return p.isValidSingleTimeFormat(timeStr)
 }
 
-// isValidSingleTimeFormat checks if the string is a valid single time format (HH:MM)
+// isValidSingleTimeFormat checks if the string is a valid single time format
+// 支持格式: HH:MM, H:MM, 下午H:MM, H:MM PM, 等
 func (p *ResponseParserImpl) isValidSingleTimeFormat(timeStr string) bool {
-	if len(timeStr) != 5 {
-		return false
+	timeStr = strings.TrimSpace(timeStr)
+
+	// 支持多种时间格式
+	timeFormats := []string{
+		"15:04",      // 14:30
+		"3:04",       // 9:30
+		"下午3:04",    // 中文格式
+		"上午3:04",    // 中文格式
+		"3:04 PM",    // 英文格式
+		"3:04 AM",    // 英文格式
 	}
 
-	if timeStr[2] != ':' {
-		return false
-	}
-
-	// 验证小时
-	hours := timeStr[:2]
-	if len(hours) != 2 {
-		return false
-	}
-	for _, char := range hours {
-		if char < '0' || char > '9' {
-			return false
+	for _, format := range timeFormats {
+		if _, err := time.Parse(format, timeStr); err == nil {
+			return true
 		}
 	}
 
-	// 验证分钟
-	minutes := timeStr[3:]
-	if len(minutes) != 2 {
-		return false
-	}
-	for _, char := range minutes {
-		if char < '0' || char > '9' {
+	// 传统格式验证（保持向后兼容）
+	if len(timeStr) == 5 && timeStr[2] == ':' {
+		hours := timeStr[:2]
+		minutes := timeStr[3:]
+
+		// 验证小时 (0-23)
+		if hour, err := strconv.Atoi(hours); err == nil {
+			if hour < 0 || hour > 23 {
+				return false
+			}
+		} else {
 			return false
 		}
+
+		// 验证分钟 (0-59)
+		if minute, err := strconv.Atoi(minutes); err == nil {
+			if minute < 0 || minute > 59 {
+				return false
+			}
+		} else {
+			return false
+		}
+
+		return true
 	}
 
-	return true
+	return false
 }
 
 // containsNumbers checks if the string contains numbers
