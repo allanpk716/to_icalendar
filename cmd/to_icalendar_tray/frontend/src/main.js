@@ -2,26 +2,44 @@ import './style.css';
 import './app.css';
 
 import logo from './assets/images/logo-universal.png';
-import { Show, Hide, IsWindowVisible, Quit } from '../wailsjs/go/main/App';
+import { Show, Hide, IsWindowVisible, Quit, InitConfigWithStreaming } from '../wailsjs/go/main/App';
 
 document.querySelector('#app').innerHTML = `
     <div class="container">
-        <img id="logo" class="logo" alt="to_icalendar logo">
-        <h1>to_icalendar 系统托盘</h1>
+        <h1 class="app-title">to_icalendar 系统托盘</h1>
+
+        <!-- 状态显示 -->
         <div class="status" id="status">应用程序正在运行...</div>
+
+        <!-- 初始化区域 -->
+        <div class="init-section" id="initSection">
+            <h3>配置初始化</h3>
+            <p>首次使用需要初始化配置文件以连接 Microsoft Todo 服务</p>
+            <button class="btn btn-primary" id="initBtn" onclick="initConfig()">
+                初始化配置文件
+            </button>
+        </div>
+
+        <!-- 日志显示区域 -->
+        <div class="log-section" id="logSection" style="display: none;">
+            <h3>初始化日志</h3>
+            <div class="log-container" id="logContainer"></div>
+            <div class="result-section" id="resultSection" style="display: none;">
+                <h4>初始化结果</h4>
+                <div id="resultContent"></div>
+            </div>
+        </div>
+
+        <!-- 控制按钮 -->
         <div class="controls">
             <button class="btn" id="showBtn" onclick="showWindow()">显示窗口</button>
             <button class="btn" id="hideBtn" onclick="hideWindow()">隐藏到托盘</button>
             <button class="btn btn-danger" id="quitBtn" onclick="quitApp()">退出应用</button>
         </div>
-        <div class="info">
-            <p>to_icalendar 系统托盘应用程序</p>
-            <p>应用程序最小化到系统托盘后继续在后台运行</p>
-        </div>
     </div>
 `;
 
-document.getElementById('logo').src = logo;
+// Logo已移除，界面更加简洁
 
 let statusElement = document.getElementById("status");
 let showBtn = document.getElementById("showBtn");
@@ -90,6 +108,93 @@ window.quitApp = async function () {
     }
 };
 
+// 添加初始化相关变量
+let isInitializing = false;
+
+// 初始化配置
+window.initConfig = async function () {
+    if (isInitializing) return;
+
+    try {
+        isInitializing = true;
+        const initBtn = document.getElementById('initBtn');
+        initBtn.disabled = true;
+        initBtn.textContent = '正在初始化...';
+
+        // 显示日志区域
+        document.getElementById('logSection').style.display = 'block';
+
+        // 清空现有内容
+        document.getElementById('logContainer').innerHTML = '';
+        document.getElementById('resultSection').style.display = 'none';
+
+        // 滚动到日志区域
+        document.getElementById('logSection').scrollIntoView({ behavior: 'smooth' });
+
+        // 调用后端初始化方法
+        await InitConfigWithStreaming();
+
+    } catch (err) {
+        appendLog('error', `初始化异常: ${err}`);
+        // 重置按钮状态
+        resetInitButton();
+    }
+};
+
+// 重置初始化按钮状态
+function resetInitButton() {
+    const initBtn = document.getElementById('initBtn');
+    initBtn.disabled = false;
+    initBtn.textContent = '初始化配置文件';
+    isInitializing = false;
+}
+
+// 添加日志到显示区域
+function appendLog(type, message) {
+    const logContainer = document.getElementById('logContainer');
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry log-${type}`;
+
+    const timestamp = new Date().toLocaleTimeString();
+    logEntry.innerHTML = `<span class="log-time">[${timestamp}]</span> ${message}`;
+
+    logContainer.appendChild(logEntry);
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+// 显示初始化结果
+function showResult(result) {
+    const resultSection = document.getElementById('resultSection');
+    const resultContent = document.getElementById('resultContent');
+
+    if (result.success) {
+        resultContent.innerHTML = `
+            <div class="result-success">
+                <p>✅ ${result.message}</p>
+                <p><strong>配置目录:</strong> ${result.configDir}</p>
+                <p><strong>配置文件:</strong> ${result.serverConfig}</p>
+                <div class="next-steps">
+                    <h4>下一步操作:</h4>
+                    <ol>
+                        <li>编辑 server.yaml 文件，配置 Microsoft Todo 信息</li>
+                        <li>获取 Azure AD 租户 ID、客户端 ID 和密钥</li>
+                        <li>配置完成后运行测试连接验证</li>
+                    </ol>
+                </div>
+            </div>
+        `;
+    } else {
+        resultContent.innerHTML = `
+            <div class="result-error">
+                <p>❌ ${result.message}</p>
+            </div>
+        `;
+    }
+
+    resultSection.style.display = 'block';
+    resultSection.scrollIntoView({ behavior: 'smooth' });
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', initializeUI);
 
@@ -102,3 +207,14 @@ setInterval(async () => {
         // 忽略定期检查的错误，避免控制台噪音
     }
 }, 2000); // 每2秒检查一次
+
+// 事件监听器 - 监听后端日志
+runtime.EventsOn("initLog", (logMessage) => {
+    appendLog(logMessage.type, logMessage.message);
+});
+
+// 事件监听器 - 监听初始化结果
+runtime.EventsOn("initResult", (result) => {
+    resetInitButton();
+    showResult(result);
+});

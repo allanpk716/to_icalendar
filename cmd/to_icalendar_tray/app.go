@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -13,6 +15,21 @@ import (
 
 // 使用 main.go 中嵌入的图标
 // 注意：这里不再重复嵌入，避免资源重复
+
+// InitResult 初始化结果结构
+type InitResult struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	ConfigDir    string `json:"configDir"`
+	ServerConfig string `json:"serverConfig"`
+}
+
+// LogMessage 日志消息结构
+type LogMessage struct {
+	Type    string `json:"type"`    // info, debug, error, success, warn
+	Message string `json:"message"`
+	Time    string `json:"time"`
+}
 
 // App struct
 type App struct {
@@ -181,4 +198,117 @@ func (a *App) Quit() {
 			}
 		}()
 	})
+}
+
+// InitConfigWithStreaming 带实时日志的初始化
+func (a *App) InitConfigWithStreaming() {
+	// 发送开始日志
+	a.sendLog("info", "🚀 开始初始化配置...")
+
+	// 获取用户目录和配置路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		a.sendLog("error", fmt.Sprintf("❌ 获取用户目录失败: %v", err))
+		return
+	}
+	a.sendLog("debug", fmt.Sprintf("用户目录: %s", homeDir))
+
+	configDir := filepath.Join(homeDir, ".to_icalendar")
+	serverConfigPath := filepath.Join(configDir, "server.yaml")
+
+	// 创建配置目录
+	a.sendLog("debug", "正在创建配置目录...")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		a.sendLog("error", fmt.Sprintf("❌ 创建配置目录失败: %v", err))
+		return
+	}
+	a.sendLog("success", fmt.Sprintf("✅ 配置目录创建成功: %s", configDir))
+
+	// 检查文件是否已存在 - 根据用户需求，直接显示成功并跳过初始化
+	a.sendLog("debug", "检查配置文件是否已存在...")
+	if _, err := os.Stat(serverConfigPath); err == nil {
+		a.sendLog("success", fmt.Sprintf("✅ 配置文件已存在: %s", serverConfigPath))
+		a.sendLog("info", "配置已初始化，可以开始使用")
+		a.sendResult(true, "配置文件已存在，无需重复初始化", configDir, serverConfigPath)
+		return
+	}
+
+	// 创建配置文件内容（复用 CLI 版本的完整模板）
+	a.sendLog("debug", "创建默认配置文件内容...")
+	serverConfigContent := `# Microsoft Todo 配置
+microsoft_todo:
+  tenant_id: "YOUR_TENANT_ID"
+  client_id: "YOUR_CLIENT_ID"
+  client_secret: "YOUR_CLIENT_SECRET"
+  user_email: ""
+  timezone: "Asia/Shanghai"
+
+# 提醒配置
+reminder:
+  default_remind_before: "15m"
+  enable_smart_reminder: true
+
+# 去重配置
+deduplication:
+  enabled: true
+  time_window_minutes: 5
+  similarity_threshold: 80
+  check_incomplete_only: true
+  enable_local_cache: true
+  enable_remote_query: true
+
+# Dify AI 配置（可选）
+dify:
+  api_endpoint: ""
+  api_key: ""
+  timeout: 60
+
+# 缓存配置
+cache:
+  auto_cleanup_days: 30
+  cleanup_on_startup: true
+  preserve_successful_hashes: true
+
+# 日志配置
+logging:
+  level: "info"
+  console_output: true
+  file_output: true
+  log_dir: "./Logs"`
+
+	// 写入文件
+	a.sendLog("debug", "写入配置文件...")
+	if err := os.WriteFile(serverConfigPath, []byte(serverConfigContent), 0600); err != nil {
+		a.sendLog("error", fmt.Sprintf("❌ 创建配置文件失败: %v", err))
+		return
+	}
+	a.sendLog("success", fmt.Sprintf("✅ 配置文件创建成功: %s", serverConfigPath))
+
+	// 发送完成信息
+	a.sendLog("info", "🎉 初始化完成！")
+	a.sendLog("info", "📝 请编辑 server.yaml 文件配置 Microsoft Todo 信息")
+	a.sendResult(true, "初始化成功", configDir, serverConfigPath)
+}
+
+// sendLog 发送日志到前端
+func (a *App) sendLog(logType, message string) {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "initLog", LogMessage{
+			Type:    logType,
+			Message: message,
+			Time:    time.Now().Format("15:04:05"),
+		})
+	}
+}
+
+// sendResult 发送最终结果
+func (a *App) sendResult(success bool, message, configDir, serverConfig string) {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "initResult", InitResult{
+			Success:      success,
+			Message:      message,
+			ConfigDir:    configDir,
+			ServerConfig: serverConfig,
+		})
+	}
 }
