@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/allanpk716/to_icalendar/internal/logger"
+	timezonepkg "github.com/allanpk716/to_icalendar/internal/timezone"
 )
 
 // AuthConfig 包含 Microsoft Graph API 认证所需的配置
@@ -716,25 +717,36 @@ func (c *SimpleTodoClient) CreateTaskWithDetails(title, description, listID stri
 
 	// 设置截止时间
 	if !dueTime.IsZero() {
-		// 使用本地时间，确保时间格式包含时区信息
-		// Microsoft Graph API 会根据提供的 timeZone 字段正确处理时区
-		localTime := dueTime.Local()
+		// 使用UTC标准化处理：从UTC时间转换为目标时区
+		// 这避免了Windows系统的时区数据库问题和双重时区转换
+		targetTime := timezonepkg.ConvertToTargetTimezone(dueTime, timezone)
+		formattedTime := timezonepkg.FormatTimeForGraphAPI(dueTime, timezone)
+
 		newTask["dueDateTime"] = map[string]interface{}{
-			"dateTime": localTime.Format("2006-01-02T15:04:05"),
+			"dateTime": formattedTime,
 			"timeZone": timezone,
 		}
-		logger.Infof("Setting due time: %s (timezone: %s)", localTime.Format("2006-01-02 15:04:05"), timezone)
+		logger.Infof("设置截止时间: %s (原始UTC: %s, 目标时区: %s)",
+			targetTime.Format("2006-01-02 15:04:05"),
+			dueTime.UTC().Format("2006-01-02 15:04:05"),
+			timezone)
 	}
 
 	// 设置提醒时间
 	if !reminderTime.IsZero() {
-		// 在调用Microsoft Graph API前验证时间参数
-		formattedTime := reminderTime.Format(time.RFC3339)
-		logger.Infof("将发送提醒时间: %s (时区: %s)", formattedTime, timezone)
+		// 使用UTC标准化处理：从UTC时间转换为目标时区
+		// 保持与dueTime处理的一致性
+		targetReminderTime := timezonepkg.ConvertToTargetTimezone(reminderTime, timezone)
+		formattedReminderTime := timezonepkg.FormatTimeForGraphAPI(reminderTime, timezone)
 
-		// 使用RFC3339格式，这是Microsoft Graph API的标准格式
+		logger.Infof("设置提醒时间: %s (原始UTC: %s, 目标时区: %s)",
+			targetReminderTime.Format("2006-01-02 15:04:05"),
+			reminderTime.UTC().Format("2006-01-02 15:04:05"),
+			timezone)
+
+		// 使用标准化的时间格式，与dueDateTime保持一致
 		newTask["reminderDateTime"] = map[string]interface{}{
-			"dateTime": formattedTime,
+			"dateTime": formattedReminderTime,
 			"timeZone": timezone,
 		}
 	} else {

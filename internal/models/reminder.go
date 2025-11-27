@@ -137,16 +137,20 @@ type ServerConfig struct {
 // ParsedReminder represents a reminder with parsed time information.
 // It includes the original reminder data, calculated due/alarm times, and formatted strings.
 type ParsedReminder struct {
-	Original      Reminder       // 原始数据
-	DueTime       time.Time      // 截止时间
-	AlarmTime     time.Time      // 提醒时间
-	PriorityValue int            // iCalendar优先级值（1-9）
-	Priority      int            // 原始优先级值（用于 Microsoft Todo）
-	Timezone      *time.Location // 时区信息
-	List          string         // 任务列表名称
-	Description   string         // 描述信息
-	DueTimeStr    string         // 格式化的截止时间字符串
-	RemindTimeStr string         // 格式化的提醒时间字符串
+	Original         Reminder       // 原始数据
+	DueTime          time.Time      // 截止时间（保留向后兼容）
+	AlarmTime        time.Time      // 提醒时间（保留向后兼容）
+	PriorityValue    int            // iCalendar优先级值（1-9）
+	Priority         int            // 原始优先级值（用于 Microsoft Todo）
+	Timezone         *time.Location // 时区信息
+	List             string         // 任务列表名称
+	Description      string         // 描述信息
+	DueTimeStr       string         // 格式化的截止时间字符串
+	RemindTimeStr    string         // 格式化的提醒时间字符串
+	// UTC标准化字段（新增）
+	DueTimeUTC       time.Time      // 截止时间（UTC）
+	AlarmTimeUTC     time.Time      // 提醒时间（UTC）
+	UserTimezone     string         // 用户配置的时区名称
 }
 
 // ParseReminderTime parses time information from a reminder and creates a ParsedReminder.
@@ -203,17 +207,30 @@ func ParseReminderTime(reminder Reminder, timezone *time.Location) (*ParsedRemin
 	return ParseReminderTimeWithConfig(reminder, timezone, nil)
 }
 
-// ParseReminderTimeWithConfig 使用配置信息解析提醒时间
+// ParseReminderTimeWithConfig 使用配置信息解析提醒时间，采用UTC标准化处理
 func ParseReminderTimeWithConfig(reminder Reminder, timezone *time.Location, config *ReminderConfig) (*ParsedReminder, error) {
 	// 处理时间范围，提取开始时间
 	processedTime := parseTimeFromRange(reminder.Time)
 
-	// 解析日期和时间
+	// 获取用户时区名称字符串
+	userTimezone := "UTC"
+	if timezone != nil {
+		userTimezone = timezone.String()
+	}
+
+	// UTC标准化处理：先用本地时区解析，然后转换为UTC
 	dateTimeStr := reminder.Date + " " + processedTime
-	dueTime, err := time.ParseInLocation("2006-01-02 15:04", dateTimeStr, timezone)
+	localDueTime, err := time.ParseInLocation("2006-01-02 15:04", dateTimeStr, timezone)
 	if err != nil {
 		return nil, err
 	}
+
+	// 转换为UTC时间（内部统一使用UTC）
+	dueTimeUTC := localDueTime.UTC()
+	log.Printf("时间解析: 本地时间 %s -> UTC时间 %s (时区: %s)",
+		localDueTime.Format("2006-01-02 15:04:05"),
+		dueTimeUTC.Format("2006-01-02 15:04:05"),
+		userTimezone)
 
 	// 解析提前提醒时间
 	remindBefore := reminder.RemindBefore
@@ -230,10 +247,17 @@ func ParseReminderTimeWithConfig(reminder Reminder, timezone *time.Location, con
 		log.Printf("用户设置的提醒时间: %s，将优先使用用户设置", remindBefore)
 	}
 
-	alarmTime, err := parseDuration(dueTime, remindBefore)
+	// 计算提醒时间（基于本地时间）
+	localAlarmTime, err := parseDuration(localDueTime, remindBefore)
 	if err != nil {
 		return nil, err
 	}
+
+	// 转换提醒时间为UTC
+	alarmTimeUTC := localAlarmTime.UTC()
+	log.Printf("提醒时间: 本地时间 %s -> UTC时间 %s",
+		localAlarmTime.Format("2006-01-02 15:04:05"),
+		alarmTimeUTC.Format("2006-01-02 15:04:05"))
 
 	// 转换优先级
 	priorityValue := 5 // 默认中等优先级
@@ -256,21 +280,25 @@ func ParseReminderTimeWithConfig(reminder Reminder, timezone *time.Location, con
 		list = "Default" // Microsoft Todo 默认列表名称
 	}
 
-	// 格式化时间字符串
-	dueTimeStr := dueTime.Format("2006-01-02T15:04:05")
-	remindTimeStr := alarmTime.Format("2006-01-02T15:04:05")
+	// 格式化时间字符串（保持向后兼容）
+	dueTimeStr := localDueTime.Format("2006-01-02T15:04:05")
+	remindTimeStr := localAlarmTime.Format("2006-01-02T15:04:05")
 
 	return &ParsedReminder{
-		Original:      reminder,
-		DueTime:       dueTime,
-		AlarmTime:     alarmTime,
-		PriorityValue: priorityValue,
-		Priority:      priority,
-		Timezone:      timezone,
-		List:          list,
-		Description:   reminder.Description,
-		DueTimeStr:    dueTimeStr,
-		RemindTimeStr: remindTimeStr,
+		Original:         reminder,
+		DueTime:          localDueTime,      // 保留原有字段（向后兼容）
+		AlarmTime:        localAlarmTime,    // 保留原有字段（向后兼容）
+		PriorityValue:    priorityValue,
+		Priority:         priority,
+		Timezone:         timezone,
+		List:             list,
+		Description:      reminder.Description,
+		DueTimeStr:       dueTimeStr,
+		RemindTimeStr:    remindTimeStr,
+		// UTC标准化字段
+		DueTimeUTC:       dueTimeUTC,        // 截止时间（UTC）
+		AlarmTimeUTC:     alarmTimeUTC,      // 提醒时间（UTC）
+		UserTimezone:     userTimezone,      // 用户配置的时区名称
 	}, nil
 }
 

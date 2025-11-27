@@ -9,6 +9,7 @@ import (
 	"github.com/allanpk716/to_icalendar/internal/microsofttodo"
 	"github.com/allanpk716/to_icalendar/internal/models"
 	"github.com/allanpk716/to_icalendar/internal/services"
+	timezonepkg "github.com/allanpk716/to_icalendar/internal/timezone"
 )
 
 // NewTodoService 创建 Todo 服务
@@ -54,15 +55,20 @@ func (ts *TodoServiceImpl) CreateTask(ctx context.Context, reminder *models.Remi
 		return fmt.Errorf("创建 Microsoft Todo 客户端失败: %w", err)
 	}
 
-	// 恢复工作版本的完整时区处理逻辑
+	// 改进的时区处理逻辑（使用timezone工具函数）
 	var timezone *time.Location
 	if ts.config.MicrosoftTodo.Timezone != "" {
-		timezone, err = time.LoadLocation(ts.config.MicrosoftTodo.Timezone)
-		if err != nil {
-			logger.Warnf("无法加载配置的时区 %s: %v, 使用本地时区", ts.config.MicrosoftTodo.Timezone, err)
-			timezone = time.Local
+		// 使用timezone工具函数安全加载时区
+		timezone = timezonepkg.GetTimezoneLocation(ts.config.MicrosoftTodo.Timezone)
+		logger.Infof("使用时区: %s", ts.config.MicrosoftTodo.Timezone)
+
+		// 验证时区是否有效
+		if !timezonepkg.IsValidTimezone(ts.config.MicrosoftTodo.Timezone) {
+			logger.Warnf("配置的时区 '%s' 可能无效，Windows用户建议使用 'UTC'", ts.config.MicrosoftTodo.Timezone)
+			logger.Infof("支持的时区列表: %v", timezonepkg.GetSupportedTimezones())
 		}
 	} else {
+		logger.Warnf("配置中未指定时区，使用系统本地时区")
 		timezone = time.Local
 	}
 
@@ -72,16 +78,19 @@ func (ts *TodoServiceImpl) CreateTask(ctx context.Context, reminder *models.Remi
 		return fmt.Errorf("完整时间解析失败: %w", parseErr)
 	}
 
-	// 从解析结果中提取时间信息
-	dueDateTime := parsedReminder.DueTime
-	reminderTime := parsedReminder.AlarmTime
+	// 从解析结果中提取时间信息（使用UTC标准化字段）
+	dueDateTime := parsedReminder.DueTimeUTC       // 使用UTC时间
+	reminderTime := parsedReminder.AlarmTimeUTC    // 使用UTC时间
+	userTimezone := parsedReminder.UserTimezone    // 用户配置的时区
 
 	// 添加详细的时间处理调试日志
-	logger.Infof("完整时间处理流程:")
+	logger.Infof("完整时间处理流程（UTC标准化）:")
 	logger.Infof("  输入提醒: %+v", reminder)
-	logger.Infof("  时区: %s", timezone.String())
-	logger.Infof("  解析后截止时间: %s", parsedReminder.DueTime.Format(time.RFC3339))
-	logger.Infof("  解析后提醒时间: %s", parsedReminder.AlarmTime.Format(time.RFC3339))
+	logger.Infof("  用户时区: %s", userTimezone)
+	logger.Infof("  本地截止时间: %s", parsedReminder.DueTime.Format("2006-01-02 15:04:05"))
+	logger.Infof("  UTC截止时间: %s", parsedReminder.DueTimeUTC.Format("2006-01-02 15:04:05"))
+	logger.Infof("  本地提醒时间: %s", parsedReminder.AlarmTime.Format("2006-01-02 15:04:05"))
+	logger.Infof("  UTC提醒时间: %s", parsedReminder.AlarmTimeUTC.Format("2006-01-02 15:04:05"))
 
 	importance := 1 // 默认重要性
 
@@ -113,15 +122,15 @@ func (ts *TodoServiceImpl) CreateTask(ctx context.Context, reminder *models.Remi
 		}
 	}
 
-	// 创建任务
+	// 创建任务（使用UTC时间传递，时区信息用于API转换）
 	err = todoClient.CreateTaskWithDetails(
 		reminder.Title,
 		reminder.Description,
 		listID,
-		dueDateTime,
-		reminderTime,
+		dueDateTime,      // UTC时间
+		reminderTime,     // UTC时间
 		importance,
-		ts.config.MicrosoftTodo.Timezone,
+		userTimezone,     // 用户配置的时区名称
 	)
 	if err != nil {
 		return fmt.Errorf("创建 Microsoft Todo 任务失败: %w", err)
