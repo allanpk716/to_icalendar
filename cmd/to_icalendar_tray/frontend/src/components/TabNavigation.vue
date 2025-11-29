@@ -17,17 +17,6 @@ const handleTabClick = (tabName: string) => {
       :model-value="route.name"
       @tab-click="({ paneName }) => handleTabClick(paneName)"
     >
-      <el-tab-pane label="主页" name="home">
-        <template #label>
-          <div class="tab-label">
-            <el-icon>
-              <House />
-            </el-icon>
-            <span>主页</span>
-          </div>
-        </template>
-      </el-tab-pane>
-
       <el-tab-pane label="初始化" name="init">
         <template #label>
           <div class="tab-label">
