@@ -312,3 +312,122 @@ func (a *App) sendResult(success bool, message, configDir, serverConfig string) 
 		})
 	}
 }
+
+// InitConfig 标准配置初始化方法（不发送实时日志）
+// 返回JSON格式的结果字符串，供前端调用
+func (a *App) InitConfig() string {
+	// 获取用户目录和配置路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		result := InitResult{
+			Success:      false,
+			Message:      fmt.Sprintf("获取用户目录失败: %v", err),
+			ConfigDir:    "",
+			ServerConfig: "",
+		}
+		return fmt.Sprintf(`{"success":false,"message":"%s","configDir":"","serverConfig":""}`, result.Message)
+	}
+
+	configDir := filepath.Join(homeDir, ".to_icalendar")
+	serverConfigPath := filepath.Join(configDir, "server.yaml")
+
+	// 创建配置目录
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		result := InitResult{
+			Success:      false,
+			Message:      fmt.Sprintf("创建配置目录失败: %v", err),
+			ConfigDir:    configDir,
+			ServerConfig: serverConfigPath,
+		}
+		return fmt.Sprintf(`{"success":false,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+	}
+
+	// 检查文件是否已存在
+	if _, err := os.Stat(serverConfigPath); err == nil {
+		result := InitResult{
+			Success:      true,
+			Message:      "配置文件已存在，无需重复初始化",
+			ConfigDir:    configDir,
+			ServerConfig: serverConfigPath,
+		}
+		return fmt.Sprintf(`{"success":true,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+	}
+
+	// 创建配置文件内容（复用现有的完整模板）
+	serverConfigContent := `# Microsoft Todo 配置
+microsoft_todo:
+  tenant_id: "YOUR_TENANT_ID"
+  client_id: "YOUR_CLIENT_ID"
+  client_secret: "YOUR_CLIENT_SECRET"
+  user_email: ""
+  timezone: "Asia/Shanghai"
+
+# 提醒配置
+reminder:
+  default_remind_before: "15m"
+  enable_smart_reminder: true
+
+# 去重配置
+deduplication:
+  enabled: true
+  time_window_minutes: 5
+  similarity_threshold: 80
+  check_incomplete_only: true
+  enable_local_cache: true
+  enable_remote_query: true
+
+# Dify AI 配置（可选）
+dify:
+  api_endpoint: ""
+  api_key: ""
+  timeout: 60
+
+# 缓存配置
+cache:
+  auto_cleanup_days: 30
+  cleanup_on_startup: true
+  preserve_successful_hashes: true
+
+# 日志配置
+logging:
+  level: "info"
+  console_output: true
+  file_output: true
+  log_dir: "./Logs"`
+
+	// 写入文件
+	if err := os.WriteFile(serverConfigPath, []byte(serverConfigContent), 0600); err != nil {
+		result := InitResult{
+			Success:      false,
+			Message:      fmt.Sprintf("创建配置文件失败: %v", err),
+			ConfigDir:    configDir,
+			ServerConfig: serverConfigPath,
+		}
+		return fmt.Sprintf(`{"success":false,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+	}
+
+	// 返回成功结果
+	result := InitResult{
+		Success:      true,
+		Message:      "初始化成功",
+		ConfigDir:    configDir,
+		ServerConfig: serverConfigPath,
+	}
+	return fmt.Sprintf(`{"success":true,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+}
+
+// CheckConfigExists 检查配置文件是否存在
+// 返回布尔值，表示配置是否已经初始化
+func (a *App) CheckConfigExists() bool {
+	// 获取用户目录和配置路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 检查配置文件是否存在
+	_, err = os.Stat(serverConfigPath)
+	return err == nil
+}

@@ -1,0 +1,76 @@
+@use './variables.scss' as *;
+
+// 全局样式重置
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+}
+
+// 深色主题背景
+body {
+  background-color: $background-color-base;
+  color: $text-color-primary;
+}
+
+// 应用容器
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+// 深色主题卡片样式
+.dark-card {
+  background-color: lighten($background-color-base, 5%);
+  border: 1px solid $border-color-base;
+  box-shadow: $box-shadow-base;
+}
+
+// 工具类
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+
+.flex { display: flex; }
+.flex-column { flex-direction: column; }
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+// 间距工具类
+.m-xs { margin: $spacing-xs; }
+.m-sm { margin: $spacing-sm; }
+.m-md { margin: $spacing-md; }
+.m-lg { margin: $spacing-lg; }
+
+.p-xs { padding: $spacing-xs; }
+.p-sm { padding: $spacing-sm; }
+.p-md { padding: $spacing-md; }
+.p-lg { padding: $spacing-lg; }
+
+// 模块容器样式
+.module-container {
+  @extend .dark-card;
+  border-radius: $border-radius-large;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+}
+
+// 状态颜色
+.status-success { color: $success-color; }
+.status-warning { color: $warning-color; }
+.status-danger { color: $danger-color; }
+.status-info { color: $info-color; }
