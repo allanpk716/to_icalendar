@@ -6,7 +6,7 @@ import TabNavigation from '@/components/TabNavigation.vue'
 import Home from '@/views/Home.vue'
 
 // 状态管理
-const { title, globalStatus } = useAppState()
+const { globalStatus } = useAppState()
 
 // Wails通信
 const { init: initWails } = useWails()
@@ -25,15 +25,6 @@ onMounted(async () => {
 
 <template>
   <div id="app" class="app-container">
-    <!-- 头部 -->
-    <header class="app-header">
-      <div class="header-content">
-        <div class="app-title">
-          <h1>{{ title }}</h1>
-        </div>
-      </div>
-    </header>
-
     <!-- 标签导航 -->
     <div class="nav-section">
       <TabNavigation />
@@ -66,26 +57,6 @@ onMounted(async () => {
   color: var(--text-color-primary);
 }
 
-.app-header {
-  background-color: lighten($background-color-base, 3%);
-  border-bottom: 1px solid $border-color-base;
-  padding: 12px 16px;
-  flex-shrink: 0;
-}
-
-.header-content {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 16px;
-}
-
-.app-title h1 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 500;
-  color: $primary-color;
-}
 
 .nav-section {
   background-color: lighten($background-color-base, 5%);
@@ -126,12 +97,6 @@ onMounted(async () => {
 
 // 响应式设计
 @media (max-width: 768px) {
-  .header-content {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
   .content-container {
     padding: 12px;
   }
