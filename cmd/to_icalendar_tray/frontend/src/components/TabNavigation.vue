@@ -1,10 +1,22 @@
 <script setup lang="ts">
-// 简化的标签导航组件
+import { useRouter, useRoute } from 'vue-router'
+
+const router = useRouter()
+const route = useRoute()
+
+// 切换标签页
+const handleTabClick = (tabName: string) => {
+  router.push({ name: tabName })
+}
 </script>
 
 <template>
   <div class="tab-navigation">
-    <el-tabs type="border-card">
+    <el-tabs
+      type="border-card"
+      :model-value="route.name"
+      @tab-click="({ paneName }) => handleTabClick(paneName)"
+    >
       <el-tab-pane label="主页" name="home">
         <template #label>
           <div class="tab-label">
@@ -12,6 +24,17 @@
               <House />
             </el-icon>
             <span>主页</span>
+          </div>
+        </template>
+      </el-tab-pane>
+
+      <el-tab-pane label="初始化" name="init">
+        <template #label>
+          <div class="tab-label">
+            <el-icon>
+              <Setting />
+            </el-icon>
+            <span>初始化</span>
           </div>
         </template>
       </el-tab-pane>

@@ -3,7 +3,6 @@ import { onMounted } from 'vue'
 import { useAppState } from '@/composables/useAppState'
 import { useWails } from '@/composables/useWails'
 import TabNavigation from '@/components/TabNavigation.vue'
-import Home from '@/views/Home.vue'
 
 // 状态管理
 const { globalStatus } = useAppState()
@@ -33,8 +32,8 @@ onMounted(async () => {
     <!-- 主要内容区域 -->
     <main class="main-content">
       <div class="content-container">
-        <!-- 主页面内容 -->
-        <Home />
+        <!-- 路由视图 -->
+        <router-view />
       </div>
     </main>
 
