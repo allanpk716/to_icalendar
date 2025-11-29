@@ -55,17 +55,17 @@ func NewApp(icon []byte) *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.isWindowVisible = true
-	// Start system tray in a goroutine after a short delay to ensure Wails is ready
+	// 设置系统托盘 - 增加延迟确保Wails完全初始化
 	go func() {
-		// 等待一小段时间确保Wails完全初始化
-		// time.Sleep(100 * time.Millisecond)
+		// 等待更长时间确保Wails完全初始化，避免竞态条件
+		time.Sleep(500 * time.Millisecond)
 		a.setupSystemTray()
 	}()
 }
 
 // onDomReady is called after front-end resources have been loaded
 func (a *App) onDomReady(ctx context.Context) {
-	// Here you could make your initial API calls or set up your frontend
+	// 这里可以进行前端初始化后的操作
 }
 
 // onBeforeClose is called when the application is about to quit,
@@ -84,7 +84,6 @@ func (a *App) onBeforeClose(ctx context.Context) (prevent bool) {
 
 // onShutdown is called when the application is shutting down
 func (a *App) onShutdown(ctx context.Context) {
-	// Wails正在关闭，systray清理应该已经在Quit()中完成
 	println("Wails shutdown completed")
 }
 
@@ -108,7 +107,6 @@ func (a *App) onSystrayReady() {
 		}
 	}()
 
-	
 	systray.AddSeparator()
 
 	// Exit menu item
@@ -118,15 +116,14 @@ func (a *App) onSystrayReady() {
 			a.Quit()
 		}
 	}()
+
+	// 添加调试输出，确认菜单项创建成功
+	println("系统托盘菜单初始化完成")
 }
 
 // onSystrayExit is called when the system tray is exiting
 func (a *App) onSystrayExit() {
-	// 记录systray退出日志
 	println("系统托盘清理完成")
-
-	// 确保所有systray资源被正确清理
-	// systray库会自动处理大部分清理工作
 }
 
 
@@ -172,7 +169,7 @@ func (a *App) Quit() {
 		go func() {
 			defer a.quitWG.Done()
 
-			// 第一步：停止systray (这会触发onSystrayExit)
+			// 第一步：停止systray
 			println("正在停止系统托盘...")
 			systray.Quit()
 
