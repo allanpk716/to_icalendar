@@ -1,7 +1,6 @@
 package testing
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,16 +9,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ConfigValidator 配置文件验证器
-type ConfigValidator struct{}
+// ConfigFileValidator 配置文件验证器
+type ConfigFileValidator struct{}
 
-// NewConfigValidator 创建新的配置验证器
-func NewConfigValidator() *ConfigValidator {
-	return &ConfigValidator{}
+// NewConfigFileValidator 创建新的配置验证器
+func NewConfigFileValidator() *ConfigFileValidator {
+	return &ConfigFileValidator{}
 }
 
 // ValidateConfigFile 验证配置文件的有效性
-func (cv *ConfigValidator) ValidateConfigFile() (*ConfigFileResult, error) {
+func (cv *ConfigFileValidator) ValidateConfigFile() (*ConfigFileResult, error) {
 	startTime := time.Now()
 	result := &ConfigFileResult{
 		Name:     "配置文件验证",
@@ -72,7 +71,7 @@ func (cv *ConfigValidator) ValidateConfigFile() (*ConfigFileResult, error) {
 }
 
 // ValidateMicrosoftTodoConfig 验证 Microsoft Todo 配置
-func (cv *ConfigValidator) ValidateMicrosoftTodoConfig(config *MicrosoftTodoConfig) (*ValidationResult, error) {
+func (cv *ConfigFileValidator) ValidateMicrosoftTodoConfig(config *MicrosoftTodoConfig) (*ValidationResult, error) {
 	startTime := time.Now()
 	result := &ValidationResult{
 		Name:     "Microsoft Todo 配置验证",

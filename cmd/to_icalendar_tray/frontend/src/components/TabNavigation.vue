@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter, useRoute } from 'vue-router'
+import { Setting, Tools, InfoFilled } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,6 +25,28 @@ const handleTabClick = (tabName: string) => {
               <Setting />
             </el-icon>
             <span>初始化</span>
+          </div>
+        </template>
+      </el-tab-pane>
+
+      <el-tab-pane label="配置测试" name="test">
+        <template #label>
+          <div class="tab-label">
+            <el-icon>
+              <Tools />
+            </el-icon>
+            <span>配置测试</span>
+          </div>
+        </template>
+      </el-tab-pane>
+
+      <el-tab-pane label="关于" name="about">
+        <template #label>
+          <div class="tab-label">
+            <el-icon>
+              <InfoFilled />
+            </el-icon>
+            <span>关于</span>
           </div>
         </template>
       </el-tab-pane>

@@ -4,6 +4,7 @@ import type {
   ReminderConfig,
   TestItem,
   TestProgress,
+  TestResult,
   ClipboardContent,
   ParseResult,
   CacheInfo,
@@ -44,18 +45,19 @@ export class WailsAPI {
     }
   }
 
-  // 系统测试
-  static async TestConnection(): Promise<WailsResponse<TestItem[]>> {
+  // 配置测试
+  static async TestConfiguration(): Promise<WailsResponse<TestResult>> {
     try {
-      const result = await (window as any).go.main.App.TestConnection()
+      const result = await (window as any).go.main.App.TestConfiguration()
+      const testResult: TestResult = JSON.parse(result)
       return {
         success: true,
-        data: result
+        data: testResult
       }
     } catch (error) {
       return {
         success: false,
-        error: `系统测试失败: ${error}`
+        error: `配置测试失败: ${error}`
       }
     }
   }

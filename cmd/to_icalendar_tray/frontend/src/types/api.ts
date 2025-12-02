@@ -37,7 +37,26 @@ export interface TestItem {
 export interface TestProgress {
   current: number
   total: number
-  currentTest: string
+  testName: string
+  message: string
+}
+
+export interface TestItemResult {
+  name: string
+  success: boolean
+  message: string
+  error?: string
+  details?: any
+  duration: number
+}
+
+export interface TestResult {
+  configTest: TestItemResult
+  todoTest: TestItemResult
+  difyTest?: TestItemResult
+  overallSuccess: boolean
+  duration: number
+  timestamp: string
 }
 
 // 剪贴板相关类型

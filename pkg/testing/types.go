@@ -1,5 +1,7 @@
 package testing
 
+import "time"
+
 // DifyConfig Dify 服务配置结构
 type DifyConfig struct {
 	APIEndpoint string `yaml:"api_endpoint"`

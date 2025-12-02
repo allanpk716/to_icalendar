@@ -3,14 +3,18 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/allanpk716/to_icalendar/pkg/testing"
 	"github.com/getlantern/systray"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"gopkg.in/yaml.v3"
 )
 
 // 使用 main.go 中嵌入的图标
@@ -29,6 +33,22 @@ type LogMessage struct {
 	Type    string `json:"type"`    // info, debug, error, success, warn
 	Message string `json:"message"`
 	Time    string `json:"time"`
+}
+
+// TestResult 完整测试结果结构
+type TestResult struct {
+	ConfigTest     testing.TestItemResult  `json:"configTest"`
+	TodoTest       testing.TestItemResult  `json:"todoTest"`
+	DifyTest       *testing.TestItemResult `json:"difyTest,omitempty"`
+	OverallSuccess bool                   `json:"overallSuccess"`
+	Duration       time.Duration          `json:"duration"`
+	Timestamp      string                 `json:"timestamp"`
+}
+
+// ServerConfig 配置文件结构
+type ServerConfig struct {
+	MicrosoftTodo testing.MicrosoftTodoConfig `yaml:"microsoft_todo"`
+	Dify          testing.DifyConfig          `yaml:"dify"`
 }
 
 // App struct
@@ -427,4 +447,248 @@ func (a *App) CheckConfigExists() bool {
 	// 检查配置文件是否存在
 	_, err = os.Stat(serverConfigPath)
 	return err == nil
+}
+
+// TestConfiguration 测试配置完整性和服务连通性
+func (a *App) TestConfiguration() string {
+	startTime := time.Now()
+
+	// 执行三个测试
+	configTest := a.testConfigurationFile()
+	todoTest := a.testMicrosoftTodoService()
+	difyTest := a.testDifyService()
+
+	// 构建最终结果
+	result := &TestResult{
+		ConfigTest:     *configTest,
+		TodoTest:       *todoTest,
+		DifyTest:       difyTest,
+		OverallSuccess: configTest.Success && todoTest.Success && (difyTest == nil || difyTest.Success),
+		Duration:       time.Since(startTime),
+		Timestamp:      time.Now().Format(time.RFC3339),
+	}
+
+	// 返回 JSON 字符串
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Sprintf(`{"success":false,"error":"序列化测试结果失败: %v"}`, err)
+	}
+	return string(jsonData)
+}
+
+// testConfigurationFile 测试配置文件的有效性
+func (a *App) testConfigurationFile() *testing.TestItemResult {
+	startTime := time.Now()
+	result := &testing.TestItemResult{
+		Name:     "配置文件验证",
+		Success:  false,
+		Duration: 0,
+	}
+
+	// 获取用户目录和配置文件路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		result.Error = "无法获取用户主目录"
+		result.Details = "系统错误: " + err.Error()
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 检查配置文件是否存在
+	if _, err := os.Stat(serverConfigPath); os.IsNotExist(err) {
+		result.Error = "配置文件不存在"
+		result.Details = "配置文件路径: " + serverConfigPath + "\n请先运行初始化配置"
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 读取并解析配置文件
+	configData, err := os.ReadFile(serverConfigPath)
+	if err != nil {
+		result.Error = "配置文件读取失败"
+		result.Details = "错误详情: " + err.Error() + "\n配置文件路径: " + serverConfigPath
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	var config ServerConfig
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		result.Error = "配置文件格式错误"
+		result.Details = "YAML解析错误: " + err.Error() + "\n请检查配置文件格式是否正确"
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 验证必需字段
+	missingFields := []string{}
+	if config.MicrosoftTodo.TenantID == "" {
+		missingFields = append(missingFields, "tenant_id (租户ID)")
+	}
+	if config.MicrosoftTodo.ClientID == "" {
+		missingFields = append(missingFields, "client_id (客户端ID)")
+	}
+	if config.MicrosoftTodo.ClientSecret == "" {
+		missingFields = append(missingFields, "client_secret (客户端密钥)")
+	}
+
+	if len(missingFields) > 0 {
+		result.Error = "Microsoft Todo 配置缺少必需字段: " + strings.Join(missingFields, ", ")
+		result.Details = "请在配置文件中填写以下必需字段:\n" + strings.Join(missingFields, "\n") +
+			"\n配置文件路径: " + serverConfigPath
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 检查占位符
+	placeholderFields := []string{}
+	if config.MicrosoftTodo.TenantID == "YOUR_TENANT_ID" {
+		placeholderFields = append(placeholderFields, "tenant_id")
+	}
+	if config.MicrosoftTodo.ClientID == "YOUR_CLIENT_ID" {
+		placeholderFields = append(placeholderFields, "client_id")
+	}
+	if config.MicrosoftTodo.ClientSecret == "YOUR_CLIENT_SECRET" {
+		placeholderFields = append(placeholderFields, "client_secret")
+	}
+
+	if len(placeholderFields) > 0 {
+		result.Error = "Microsoft Todo 配置包含占位符，需要更新为实际值"
+		result.Details = "以下字段仍为默认占位符:\n" + strings.Join(placeholderFields, "\n") +
+			"\n请访问 Azure Portal (portal.azure.com) 创建应用注册并获取实际值"
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	result.Success = true
+	result.Message = "配置文件验证通过"
+	result.Duration = time.Since(startTime)
+	return result
+}
+
+// testMicrosoftTodoService 测试 Microsoft Todo 服务
+func (a *App) testMicrosoftTodoService() *testing.TestItemResult {
+	startTime := time.Now()
+	result := &testing.TestItemResult{
+		Name:     "Microsoft Todo 服务测试",
+		Success:  false,
+		Duration: 0,
+	}
+
+	// 获取配置目录和文件
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		result.Error = "无法获取用户主目录"
+		result.Details = "系统错误: " + err.Error()
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 加载配置文件
+	configData, err := os.ReadFile(serverConfigPath)
+	if err != nil {
+		result.Error = "Microsoft Todo 配置文件读取失败"
+		result.Details = "错误详情: " + err.Error() + "\n配置文件路径: " + serverConfigPath
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	var config ServerConfig
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		result.Error = "Microsoft Todo 配置文件格式错误"
+		result.Details = "YAML解析错误: " + err.Error() + "\n请检查配置文件格式"
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 验证配置完整性
+	missingFields := []string{}
+	if config.MicrosoftTodo.TenantID == "" {
+		missingFields = append(missingFields, "TenantID")
+	}
+	if config.MicrosoftTodo.ClientID == "" {
+		missingFields = append(missingFields, "ClientID")
+	}
+	if config.MicrosoftTodo.ClientSecret == "" {
+		missingFields = append(missingFields, "ClientSecret")
+	}
+
+	if len(missingFields) > 0 {
+		result.Error = "Microsoft Todo 配置不完整，缺少必需字段: " + strings.Join(missingFields, ", ")
+		result.Details = "缺少字段: " + strings.Join(missingFields, ", ")
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 检查占位符
+	placeholderFields := []string{}
+	if config.MicrosoftTodo.TenantID == "YOUR_TENANT_ID" {
+		placeholderFields = append(placeholderFields, "TenantID")
+	}
+	if config.MicrosoftTodo.ClientID == "YOUR_CLIENT_ID" {
+		placeholderFields = append(placeholderFields, "ClientID")
+	}
+	if config.MicrosoftTodo.ClientSecret == "YOUR_CLIENT_SECRET" {
+		placeholderFields = append(placeholderFields, "ClientSecret")
+	}
+
+	if len(placeholderFields) > 0 {
+		result.Error = "Microsoft Todo 配置仍使用默认占位符"
+		result.Details = "以下字段需要更新为实际的Azure AD凭证:\n" + strings.Join(placeholderFields, "\n")
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 注意：这里不做实际的API连接测试，只做配置验证
+	// 实际的API测试需要更复杂的OAuth流程，这里简化处理
+	result.Success = true
+	result.Message = "Microsoft Todo 配置验证通过（仅配置检查，未进行API连接测试）"
+	result.Duration = time.Since(startTime)
+	return result
+}
+
+// testDifyService 测试 Dify 服务（使用共享测试器）
+func (a *App) testDifyService() *testing.TestItemResult {
+	// 获取配置目录和文件
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return &testing.TestItemResult{
+			Name:     "Dify 服务测试",
+			Success:  false,
+			Error:    "无法获取用户主目录: " + err.Error(),
+			Duration: 0,
+		}
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 加载配置文件
+	configData, err := os.ReadFile(serverConfigPath)
+	if err != nil {
+		return &testing.TestItemResult{
+			Name:     "Dify 服务测试",
+			Success:  false,
+			Error:    "配置文件读取失败: " + err.Error(),
+			Details:  "配置文件路径: " + serverConfigPath,
+			Duration: 0,
+		}
+	}
+
+	var config ServerConfig
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		return &testing.TestItemResult{
+			Name:     "Dify 服务测试",
+			Success:  false,
+			Error:    "配置文件解析错误: " + err.Error(),
+			Details:  "YAML解析错误，请检查配置文件格式",
+			Duration: 0,
+		}
+	}
+
+	// 使用共享测试器进行测试
+	difyTester := testing.NewDifyTester()
+	return difyTester.TestDifyService(&config.Dify)
 }
