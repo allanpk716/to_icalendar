@@ -124,7 +124,8 @@ func (a *App) onShutdown(ctx context.Context) {
 
 // setupSystemTray configures the system tray icon and menu
 func (a *App) setupSystemTray() {
-	systray.Run(a.onSystrayReady, a.onSystrayExit)
+    runtime.LockOSThread()
+    systray.Run(a.onSystrayReady, a.onSystrayExit)
 }
 
 // onSystrayReady is called when the system tray is ready
