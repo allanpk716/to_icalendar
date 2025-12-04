@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useClipboardUpload } from '@/composables/useClipboardUpload'
 import {
-  Picture,
-  Upload,
-  Refresh,
-  Loading,
   DocumentCopy,
+  Loading,
+  Picture,
+  Refresh,
   Tools
 } from '@element-plus/icons-vue'
-import { useClipboardUpload } from '@/composables/useClipboardUpload'
+import { ElMessage } from 'element-plus'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 // 使用剪贴板上传功能
 const {
@@ -162,39 +161,20 @@ const getPriorityType = (priority: string) => {
     <!-- 顶部操作栏 -->
     <div class="action-bar">
       <div class="left-actions">
-        <el-button
-          type="primary"
-          :icon="DocumentCopy"
-          @click="handleGetClipboard"
-          :loading="isProcessing"
-        >
+        <el-button type="primary" :icon="DocumentCopy" @click="handleGetClipboard" :loading="isProcessing">
           获取剪贴板图片
         </el-button>
 
-        <el-button
-          type="success"
-          :icon="Tools"
-          @click="handleProcessUpload"
-          :disabled="!canProcess"
-          :loading="isProcessing"
-        >
+        <el-button type="success" :icon="Tools" @click="handleProcessUpload" :disabled="!canProcess"
+          :loading="isProcessing">
           {{ processButtonText }}
         </el-button>
 
-        <el-button
-          :icon="Refresh"
-          @click="getClipboardImage"
-          :loading="isProcessing"
-          circle
-        />
+        <el-button :icon="Refresh" @click="getClipboardImage" :loading="isProcessing" circle />
       </div>
 
       <div class="right-actions">
-        <el-switch
-          v-model="autoRefresh"
-          active-text="自动刷新"
-          inactive-text="手动刷新"
-        />
+        <el-switch v-model="autoRefresh" active-text="自动刷新" inactive-text="手动刷新" />
       </div>
     </div>
 
@@ -203,32 +183,23 @@ const getPriorityType = (priority: string) => {
       <!-- 左侧：图片预览 -->
       <div class="preview-section">
         <el-card header="图片预览" class="preview-card">
-          <div v-if="hasImage" class="image-container">
-            <div class="image-wrapper" @click="showImageDialog = true">
-              <img
-                v-if="previewUrl"
-                :key="previewUrl"
-                :src="previewUrl"
-                class="preview-image-native"
-                :style="{ visibility: hasImage ? 'visible' : 'hidden' }"
-                @load="handleImageLoad"
-                @error="handleImageError"
-              />
-              <div v-if="isProcessing" class="image-placeholder">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>加载中...</span>
-              </div>
-              <div v-if="imageError" class="image-error">
-                <el-icon><Picture /></el-icon>
-                <span>图片加载失败</span>
-              </div>
+          <div v-if="hasImage" class="image-container" @click="showImageDialog = true">
+            <el-image v-if="previewUrl" :src="previewUrl" fit="contain" class="preview-image-el" @load="handleImageLoad"
+              @error="handleImageError" />
+            <div v-if="isProcessing" class="image-placeholder">
+              <el-icon class="is-loading">
+                <Loading />
+              </el-icon>
+              <span>加载中...</span>
+            </div>
+            <div v-if="imageError" class="image-error">
+              <el-icon>
+                <Picture />
+              </el-icon>
+              <span>图片加载失败</span>
             </div>
           </div>
-          <el-empty
-            v-else
-            description="暂无剪贴板图片"
-            :image-size="120"
-          >
+          <el-empty v-else description="暂无剪贴板图片" :image-size="120">
             <el-button type="primary" @click="handleGetClipboard">
               获取剪贴板内容
             </el-button>
@@ -240,11 +211,7 @@ const getPriorityType = (priority: string) => {
       <div class="process-section">
         <!-- 进度显示 -->
         <el-card header="处理进度" class="progress-card">
-          <el-steps
-            :active="progress.step"
-            direction="vertical"
-            finish-status="success"
-          >
+          <el-steps :active="progress.step" direction="vertical" finish-status="success">
             <el-step title="检查剪贴板" description="验证剪贴板内容" />
             <el-step title="AI 分析" description="使用 Dify AI 分析内容" />
             <el-step title="创建任务" description="在 Microsoft Todo 创建任务" />
@@ -262,11 +229,7 @@ const getPriorityType = (priority: string) => {
         <!-- 日志输出 -->
         <el-card header="处理日志" class="log-card">
           <div class="log-container" ref="logContainer">
-            <div
-              v-for="(log, index) in logs"
-              :key="index"
-              :class="['log-item', `log-${log.type}`]"
-            >
+            <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
               <span class="log-time">{{ log.time }}</span>
               <span class="log-message">{{ log.message }}</span>
             </div>
@@ -279,33 +242,15 @@ const getPriorityType = (priority: string) => {
     </div>
 
     <!-- 图片预览对话框 -->
-    <el-dialog
-      v-model="showImageDialog"
-      title="图片预览"
-      width="80%"
-      :center="true"
-    >
-      <el-image
-        v-if="previewUrl"
-        :src="previewUrl"
-        fit="contain"
-        style="width: 100%; max-height: 70vh;"
-      />
+    <el-dialog v-model="showImageDialog" title="图片预览" width="80%" :center="true">
+      <el-image v-if="previewUrl" :src="previewUrl" fit="contain" style="width: 100%; max-height: 70vh;" />
     </el-dialog>
 
     <!-- 处理结果对话框 -->
-    <el-dialog
-      v-model="showResultDialog"
-      title="处理结果"
-      width="60%"
-      :center="true"
-    >
+    <el-dialog v-model="showResultDialog" title="处理结果" width="60%" :center="true">
       <div v-if="processResult" class="result-content">
-        <el-result
-          :icon="processResult.success ? 'success' : 'error'"
-          :title="processResult.success ? '处理成功' : '处理失败'"
-          :sub-title="processResult.message"
-        >
+        <el-result :icon="processResult.success ? 'success' : 'error'" :title="processResult.success ? '处理成功' : '处理失败'"
+          :sub-title="processResult.message">
           <template #extra v-if="processResult.success">
             <el-descriptions :column="1" border>
               <el-descriptions-item label="任务标题">
@@ -370,54 +315,68 @@ const getPriorityType = (priority: string) => {
   min-height: 0;
 }
 
+.preview-section {
+  align-self: start;
+}
+
 .preview-card,
 .progress-card,
 .log-card {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  :deep(.el-card__header) {
+    flex: 0 0 auto;
+  }
 
   :deep(.el-card__body) {
-    height: calc(100% - 57px);
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
+    position: relative;
+    contain: layout paint;
+    padding: 0 !important;
   }
+}
+
+.preview-card {
+  height: 60vh;
+  max-height: 70vh;
 }
 
 .image-container {
   height: 100%;
-  min-height: 400px;
-  display: grid; // 改用Grid布局，更稳定
-  place-items: center; // 简化的居中方式
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
-  // 移除 contain: layout 避免布局计算问题
-}
-
-.image-wrapper {
-  display: contents; // 让子元素直接参与Grid布局
   cursor: pointer;
-
-  // 移除所有可能影响布局的属性
-  // max-width: 100%;
-  // max-height: 100%;
+  overflow: hidden;
+  contain: layout paint;
 }
 
-.preview-image-native {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
+.preview-image-el {
+  position: absolute;
+  inset: 0;
+}
+
+:deep(.preview-image-el .el-image__inner) {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  display: block; // 确保块级显示，在Grid中更稳定
-
-  // 简单的过渡效果，避免复杂的transform
-  transition: opacity 0.2s ease;
-
-  &:hover {
-    opacity: 0.95;
-  }
+  object-position: top left;
+  display: block;
 }
 
 // 更新占位符样式
 .image-placeholder,
 .image-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   align-items: center;
