@@ -23,6 +23,7 @@ const {
   isRunning,
   currentTest,
   progressMessage,
+  testLogs,
   startTest,
   resetTest,
   formatDuration,
@@ -188,6 +189,40 @@ const showDetailedError = async (item: TestItemResult) => {
                 <el-icon><Refresh /></el-icon>
                 重置
               </el-button>
+            </div>
+          </div>
+        </el-card>
+      </div>
+
+      <!-- 测试日志区域 -->
+      <div v-if="testLogs.length > 0 || isRunning" class="log-section">
+        <el-card class="log-card" shadow="hover">
+          <template #header>
+            <div class="log-header">
+              <span class="log-title">测试日志</span>
+              <el-button
+                v-if="testLogs.length > 0"
+                size="small"
+                text
+                @click="testLogs = []"
+              >
+                清空日志
+              </el-button>
+            </div>
+          </template>
+          <div class="log-content">
+            <div
+              v-for="(log, index) in testLogs"
+              :key="index"
+              class="log-item"
+              :class="`log-${log.type}`"
+            >
+              <span class="log-time">{{ log.timestamp }}</span>
+              <span class="log-message">{{ log.message }}</span>
+            </div>
+            <div v-if="isRunning" class="log-item log-info">
+              <span class="log-time">{{ new Date().toLocaleTimeString() }}</span>
+              <span class="log-message">{{ progressMessage }}</span>
             </div>
           </div>
         </el-card>
@@ -488,6 +523,90 @@ const showDetailedError = async (item: TestItemResult) => {
         max-height: calc(80vh - 120px);
         overflow-y: auto;
       }
+    }
+  }
+}
+
+// 测试日志样式
+.log-section {
+  margin-top: 20px;
+}
+
+.log-card {
+  .log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .log-title {
+    font-weight: 500;
+    color: var(--el-text-color-primary);
+  }
+}
+
+.log-content {
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: var(--el-fill-color-lighter);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.log-item {
+  display: flex;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  .log-time {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    min-width: 80px;
+    flex-shrink: 0;
+  }
+
+  .log-message {
+    flex: 1;
+    word-break: break-all;
+  }
+
+  // 不同日志类型的颜色
+  &.log-info {
+    .log-message {
+      color: var(--el-color-info);
+    }
+  }
+
+  &.log-success {
+    .log-message {
+      color: var(--el-color-success);
+    }
+  }
+
+  &.log-warn {
+    .log-message {
+      color: var(--el-color-warning);
+    }
+  }
+
+  &.log-error {
+    .log-message {
+      color: var(--el-color-error);
+    }
+  }
+
+  &.log-debug {
+    .log-message {
+      color: var(--el-text-color-secondary);
+      opacity: 0.8;
     }
   }
 }

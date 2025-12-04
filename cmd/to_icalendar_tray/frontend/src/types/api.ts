@@ -46,6 +46,7 @@ export interface TestItemResult {
   success: boolean
   message: string
   error?: string
+  errorType?: string
   details?: any
   duration: number
 }
@@ -56,6 +57,13 @@ export interface TestResult {
   difyTest?: TestItemResult
   overallSuccess: boolean
   duration: number
+  timestamp: string
+}
+
+// 测试日志类型
+export interface TestLogEvent {
+  type: 'debug' | 'info' | 'warn' | 'error' | 'success'
+  message: string
   timestamp: string
 }
 

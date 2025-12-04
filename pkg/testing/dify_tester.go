@@ -89,7 +89,9 @@ func (dt *DifyTester) TestDifyService(config *DifyConfig) *TestItemResult {
 		// Dify未配置不算失败，返回nil表示跳过
 		result.Success = true
 		result.Message = "Dify 服务未配置，跳过测试"
-		result.Details = "Dify AI 服务为可选配置\n如需使用，请在配置文件中设置:\n- api_endpoint: Dify API端点地址\n- api_key: API密钥"
+		result.Details = map[string]interface{}{
+			"info": "Dify AI 服务为可选配置\n如需使用，请在配置文件中设置:\n- api_endpoint: Dify API端点地址\n- api_key: API密钥",
+		}
 		result.Duration = time.Since(startTime)
 		return result
 	}
@@ -106,7 +108,9 @@ func (dt *DifyTester) TestDifyService(config *DifyConfig) *TestItemResult {
 	if len(missingFields) > 0 {
 		result.Success = true // 部分配置也不算失败，只是提醒
 		result.Message = "Dify 服务配置不完整，跳过测试"
-		result.Details = "以下字段缺失:\n" + strings.Join(missingFields, "\n") + "\nDify为可选配置"
+		result.Details = map[string]interface{}{
+			"info": "以下字段缺失:\n" + strings.Join(missingFields, "\n") + "\nDify为可选配置",
+		}
 		result.Duration = time.Since(startTime)
 		return result
 	}
@@ -125,7 +129,9 @@ func (dt *DifyTester) TestDifyService(config *DifyConfig) *TestItemResult {
 	if len(placeholderFields) > 0 {
 		result.Success = true // 占位符也不算失败，只是提醒
 		result.Message = "Dify 服务包含占位符，跳过测试"
-		result.Details = "以下字段仍为占位符:\n" + strings.Join(placeholderFields, "\n")
+		result.Details = map[string]interface{}{
+			"info": "以下字段仍为占位符:\n" + strings.Join(placeholderFields, "\n"),
+		}
 		result.Duration = time.Since(startTime)
 		return result
 	}
@@ -139,7 +145,9 @@ func (dt *DifyTester) TestDifyService(config *DifyConfig) *TestItemResult {
 
 	result.Success = true
 	result.Message = "Dify 服务连接测试成功"
-	result.Details = "API端点: " + config.APIEndpoint + "\n连通性测试通过"
+	result.Details = map[string]interface{}{
+			"info": "API端点: " + config.APIEndpoint + "\n连通性测试通过",
+		}
 	result.Duration = time.Since(startTime)
 	return result
 }
