@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"to_icalendar_tray/internal/clipboard"
 	"github.com/allanpk716/to_icalendar/pkg/testing"
 	"github.com/getlantern/systray"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -51,6 +53,17 @@ type TestResult struct {
 type ServerConfig struct {
 	MicrosoftTodo testing.MicrosoftTodoConfig `yaml:"microsoft_todo"`
 	Dify          testing.DifyConfig          `yaml:"dify"`
+}
+
+// ClipUploadResult 剪贴板上传结果
+type ClipUploadResult struct {
+	Success      bool   `json:"success"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	Message      string `json:"message"`
+	List         string `json:"list,omitempty"`
+	Priority     string `json:"priority,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // App struct
@@ -708,4 +721,113 @@ func (a *App) sendTestLog(level, message string) {
 
 	// 发送事件到前端
 	wailsRuntime.EventsEmit(a.ctx, "testLog", logMsg)
+}
+
+// GetClipboardFromWindows 从Windows剪贴板读取图片
+// 返回 base64 编码的图片数据
+func (a *App) GetClipboardFromWindows() (string, error) {
+	a.sendClipboardLog("info", "正在检查剪贴板...")
+
+	// 创建剪贴板管理器
+	manager, err := clipboard.NewManager()
+	if err != nil {
+		a.sendClipboardLog("error", fmt.Sprintf("初始化剪贴板管理器失败: %v", err))
+		return "", err
+	}
+
+	// 检查剪贴板是否被占用
+	if manager.IsLocked() {
+		a.sendClipboardLog("warning", "剪贴板被其他程序占用，请稍后重试")
+		return "", fmt.Errorf("剪贴板被占用，请稍后重试")
+	}
+
+	// 检查剪贴板是否有内容
+	hasContent, err := manager.HasContent()
+	if err != nil {
+		a.sendClipboardLog("error", fmt.Sprintf("检查剪贴板内容失败: %v", err))
+		return "", err
+	}
+
+	if !hasContent {
+		a.sendClipboardLog("warning", "剪贴板中没有内容")
+		return "", fmt.Errorf("剪贴板为空")
+	}
+
+	// 读取图片
+	imageData, err := manager.ReadImage()
+	if err != nil {
+		a.sendClipboardLog("error", fmt.Sprintf("读取剪贴板图片失败: %v", err))
+		return "", err
+	}
+
+	// 转换为 base64
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+
+	a.sendClipboardLog("success", fmt.Sprintf("成功读取剪贴板图片 (%d bytes)", len(imageData)))
+	return base64Data, nil
+}
+
+
+// ProcessImageToTodo 处理图片并创建Todo任务（模拟实现）
+func (a *App) ProcessImageToTodo(imageBase64 string) (string, error) {
+	startTime := time.Now()
+	a.sendClipboardLog("info", "开始处理图片并创建任务...")
+
+	// 模拟处理过程
+	a.sendClipboardLog("info", "正在解码图片...")
+	time.Sleep(500 * time.Millisecond)
+
+	// 模拟 Dify 处理
+	a.sendClipboardLog("info", "正在上传图片到AI服务...")
+	time.Sleep(1 * time.Second)
+
+	a.sendClipboardLog("info", "AI正在分析图片内容...")
+	time.Sleep(1 * time.Second)
+
+	a.sendClipboardLog("success", "AI分析完成，提取任务: 示例任务")
+
+	// 模拟创建 Todo
+	a.sendClipboardLog("info", "正在创建Microsoft Todo任务...")
+	time.Sleep(500 * time.Millisecond)
+
+	a.sendClipboardLog("success", "任务创建成功！")
+
+	// 返回模拟的成功结果
+	result := &ClipUploadResult{
+		Success:     true,
+		Title:       "示例任务",
+		Description: "这是一个从剪贴板图片提取的任务",
+		Message:     "任务创建成功（演示模式）",
+		List:        "工作",
+		Priority:    "medium",
+	}
+
+	jsonData, _ := json.Marshal(result)
+	a.sendClipboardLog("info", fmt.Sprintf("处理完成，耗时: %v", time.Since(startTime)))
+	return string(jsonData), nil
+}
+
+
+// sendClipboardLog 发送剪贴板处理日志到前端
+func (a *App) sendClipboardLog(logType, message string) {
+	if a.ctx != nil {
+		wailsRuntime.EventsEmit(a.ctx, "clipboardLog", LogMessage{
+			Type:    logType,
+			Message: message,
+			Time:    time.Now().Format("15:04:05"),
+		})
+	}
+}
+
+// createClipUploadError 创建错误结果
+func (a *App) createClipUploadError(err error, startTime time.Time) string {
+	result := &ClipUploadResult{
+		Success: false,
+		Error:   err.Error(),
+		Message: fmt.Sprintf("处理失败: %v", err),
+	}
+
+	jsonData, _ := json.Marshal(result)
+	a.sendClipboardLog("error", fmt.Sprintf("处理失败: %v，耗时: %v", err, time.Since(startTime)))
+	return string(jsonData)
 }
