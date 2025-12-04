@@ -13,6 +13,7 @@ import {
   View
 } from '@element-plus/icons-vue'
 import { useTest } from '@/composables/useTest'
+import { useResponsiveDialog } from '@/composables/useResponsiveDialog'
 import type { TestItemResult } from '@/types/api'
 import TestItemDetail from '@/components/TestItemDetail.vue'
 
@@ -32,6 +33,9 @@ const {
   hasTestPassed
 } = useTest()
 
+// 使用响应式对话框管理
+const { calculateDialogWidth } = useResponsiveDialog()
+
 // 本地状态
 const error = ref<string>('')
 
@@ -44,6 +48,10 @@ const activeCollapse = ref<string[]>(['config', 'todo', 'dify'])
 // 计算属性
 const canStartTest = computed(() => !isRunning.value)
 const showResults = computed(() => testResult.value !== null)
+
+// 计算对话框宽度
+const testResultDialogWidth = computed(() => calculateDialogWidth(800, 1000))
+const errorDialogWidth = computed(() => calculateDialogWidth(600, 800))
 
 // 获取测试项状态图标和颜色
 const getTestItemIcon = (item: TestItemResult) => {
@@ -233,7 +241,7 @@ const showDetailedError = async (item: TestItemResult) => {
     <el-dialog
       v-model="showResultDialog"
       title="测试结果"
-      width="800px"
+      :width="testResultDialogWidth"
       :close-on-click-modal="false"
     >
       <div class="test-result-content">
@@ -304,7 +312,7 @@ const showDetailedError = async (item: TestItemResult) => {
     <el-dialog
       v-model="showErrorDetailDialog"
       title="错误详情"
-      width="600px"
+      :width="errorDialogWidth"
       :close-on-click-modal="false"
     >
       <div class="error-detail-content">
@@ -499,32 +507,28 @@ const showDetailedError = async (item: TestItemResult) => {
   }
 }
 
-// 对话框响应式
+// 对话框样式优化
 :deep(.el-dialog) {
-  @media (max-width: 768px) {
-    width: 90% !important;
-    margin: 5vh auto;
+  // 使用 Element Plus 的响应式行为，移除固定宽度
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+
+  .el-dialog__body {
+    padding: 20px;
+    max-height: 70vh;
+    overflow-y: auto;
   }
 
-  @media (max-width: 480px) {
-    width: 95% !important;
-    margin: 2vh auto;
-  }
+  // 保持对话框居中
+  margin: 5vh auto;
 }
 
-// 测试结果对话框特殊处理
-.test-result-dialog {
-  :deep(.el-dialog) {
-    @media (max-width: 768px) {
-      width: 95% !important;
-      height: 80vh;
-
-      .el-dialog__body {
-        max-height: calc(80vh - 120px);
-        overflow-y: auto;
-      }
-    }
-  }
+// 测试结果对话框内容样式
+// 测试结果对话框内容样式补充
+.test-result-content {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 // 测试日志样式
