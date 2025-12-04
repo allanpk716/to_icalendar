@@ -172,4 +172,19 @@ export class WailsAPI {
       }
     }
   }
+
+  // 打开配置目录
+  static async OpenConfigDirectory(): Promise<WailsResponse<void>> {
+    try {
+      await (window as any).go.main.App.OpenConfigDirectory()
+      return {
+        success: true
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `打开配置目录失败: ${error}`
+      }
+    }
+  }
 }

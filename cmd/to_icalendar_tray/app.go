@@ -6,14 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/allanpk716/to_icalendar/pkg/testing"
 	"github.com/getlantern/systray"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"gopkg.in/yaml.v3"
 )
 
@@ -149,23 +151,23 @@ func (a *App) onSystrayExit() {
 
 // Show shows the main window
 func (a *App) Show() {
-	runtime.WindowShow(a.ctx)
+	wailsRuntime.WindowShow(a.ctx)
 }
 
 // Hide hides the main window
 func (a *App) Hide() {
-	runtime.WindowHide(a.ctx)
+	wailsRuntime.WindowHide(a.ctx)
 }
 
 // HideWindow hides the main window (alias for Hide)
 func (a *App) HideWindow() {
-	runtime.WindowHide(a.ctx)
+	wailsRuntime.WindowHide(a.ctx)
 	a.isWindowVisible = false
 }
 
 // ShowWindow shows the main window (alias for Show)
 func (a *App) ShowWindow() {
-	runtime.WindowShow(a.ctx)
+	wailsRuntime.WindowShow(a.ctx)
 	a.isWindowVisible = true
 }
 
@@ -198,7 +200,7 @@ func (a *App) Quit() {
 
 			// 第二步：退出Wails应用
 			println("正在退出Wails应用...")
-			runtime.Quit(a.ctx)
+			wailsRuntime.Quit(a.ctx)
 
 			// 关闭退出完成通道
 			close(a.quitDone)
@@ -310,7 +312,7 @@ logging:
 // sendLog 发送日志到前端
 func (a *App) sendLog(logType, message string) {
 	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "initLog", LogMessage{
+		wailsRuntime.EventsEmit(a.ctx, "initLog", LogMessage{
 			Type:    logType,
 			Message: message,
 			Time:    time.Now().Format("15:04:05"),
@@ -321,7 +323,7 @@ func (a *App) sendLog(logType, message string) {
 // sendResult 发送最终结果
 func (a *App) sendResult(success bool, message, configDir, serverConfig string) {
 	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "initResult", InitResult{
+		wailsRuntime.EventsEmit(a.ctx, "initResult", InitResult{
 			Success:      success,
 			Message:      message,
 			ConfigDir:    configDir,
@@ -691,4 +693,34 @@ func (a *App) testDifyService() *testing.TestItemResult {
 	// 使用共享测试器进行测试
 	difyTester := testing.NewDifyTester()
 	return difyTester.TestDifyService(&config.Dify)
+}
+
+// OpenConfigDirectory 打开配置文件所在目录
+func (a *App) OpenConfigDirectory() error {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return fmt.Errorf("获取配置目录失败: %w", err)
+	}
+
+	appConfigDir := filepath.Join(configDir, "to_icalendar")
+
+	// Windows系统使用explorer
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("explorer", appConfigDir)
+		return cmd.Run()
+	}
+
+	// macOS使用Finder
+	if runtime.GOOS == "darwin" {
+		cmd := exec.Command("open", appConfigDir)
+		return cmd.Run()
+	}
+
+	// Linux使用xdg-open
+	if runtime.GOOS == "linux" {
+		cmd := exec.Command("xdg-open", appConfigDir)
+		return cmd.Run()
+	}
+
+	return fmt.Errorf("不支持的操作系统")
 }

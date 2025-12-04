@@ -13,6 +13,11 @@ const initResult = ref<ServerConfig | null>(null)
 const error = ref<string>('')
 const guideDialogVisible = ref(false)
 
+// 新增对话框状态
+const showSuccessDialog = ref(false)
+const showErrorDialog = ref(false)
+const errorMessage = ref('')
+
 // 计算属性
 const canInit = computed(() => !isInitializing.value)
 
@@ -72,26 +77,17 @@ const handleInit = async () => {
 
     if (response.success && response.data) {
       initResult.value = response.data
+      showSuccessDialog.value = true
       ElMessage.success('配置初始化成功！')
-
-      // 显示成功消息详情
-      await ElMessageBox.alert(
-        `配置目录: ~/.to_icalendar/\n` +
-        `服务器配置: server.yaml\n\n` +
-        `请编辑配置文件并填入您的Microsoft Todo凭证信息`,
-        '初始化成功',
-        {
-          confirmButtonText: '确定',
-          type: 'success',
-        }
-      )
     } else {
       throw new Error(response.error || '初始化失败')
     }
   } catch (err: any) {
     if (err !== 'cancel') {
-      error.value = err.message || '未知错误'
-      ElMessage.error(`初始化失败: ${error.value}`)
+      const error = err as Error
+      errorMessage.value = error.message
+      showErrorDialog.value = true
+      ElMessage.error('初始化失败，请查看详细信息')
     }
   } finally {
     isInitializing.value = false
@@ -102,6 +98,17 @@ const handleInit = async () => {
 // 查看配置指南
 const showGuide = () => {
   guideDialogVisible.value = true
+}
+
+// 打开配置目录
+const openConfigLocation = async () => {
+  try {
+    // 调用后端API打开配置目录
+    await WailsAPI.OpenConfigDirectory()
+    showSuccessDialog.value = false
+  } catch (err) {
+    ElMessage.error('无法打开配置目录')
+  }
 }
 </script>
 
@@ -169,17 +176,23 @@ const showGuide = () => {
             </div>
           </div>
         </el-card>
+      </div>
+    </div>
 
-        <!-- 初始化结果 -->
-        <el-card v-if="initResult" class="result-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <el-icon><SuccessFilled /></el-icon>
-              <span>初始化结果</span>
-            </div>
-          </template>
-
-          <div class="result-content">
+    <!-- 初始化成功对话框 -->
+    <el-dialog
+      v-model="showSuccessDialog"
+      title="初始化成功"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div class="success-content">
+        <el-result
+          icon="success"
+          title="配置初始化成功"
+          sub-title="配置文件已成功创建"
+        >
+          <template #extra>
             <el-descriptions :column="1" border>
               <el-descriptions-item label="配置目录">
                 ~/.to_icalendar/
@@ -200,10 +213,33 @@ const showGuide = () => {
                 <li>运行连接测试验证配置</li>
               </ol>
             </div>
-          </div>
-        </el-card>
+          </template>
+        </el-result>
       </div>
-    </div>
+
+      <template #footer>
+        <el-button @click="showSuccessDialog = false">关闭</el-button>
+        <el-button type="primary" @click="openConfigLocation">打开配置目录</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 初始化失败对话框 -->
+    <el-dialog
+      v-model="showErrorDialog"
+      title="初始化失败"
+      width="500px"
+      :close-on-click-modal="false"
+    >
+      <el-result
+        icon="error"
+        title="初始化失败"
+        :sub-title="errorMessage"
+      >
+        <template #extra>
+          <el-button type="primary" @click="showErrorDialog = false">确定</el-button>
+        </template>
+      </el-result>
+    </el-dialog>
 
     <!-- 配置指南对话框 -->
     <el-dialog
@@ -298,7 +334,7 @@ const showGuide = () => {
   gap: 24px;
 }
 
-.init-card, .result-card {
+.init-card {
   .card-content {
     display: flex;
     flex-direction: column;
@@ -306,13 +342,33 @@ const showGuide = () => {
     gap: 24px;
     text-align: center;
   }
+}
 
-  .card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    color: var(--text-color-primary);
+.success-content {
+  .next-steps {
+    margin-top: 20px;
+    padding: 16px;
+    background-color: var(--el-fill-color-lighter);
+    border-radius: 8px;
+
+    h4 {
+      margin: 0 0 12px 0;
+      color: var(--el-text-color-primary);
+    }
+
+    ol {
+      margin: 0;
+      padding-left: 20px;
+
+      li {
+        margin-bottom: 8px;
+        color: var(--el-text-color-regular);
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+      }
+    }
   }
 }
 
@@ -345,27 +401,6 @@ const showGuide = () => {
   flex-wrap: wrap;
 }
 
-.result-content {
-  .next-steps {
-    margin-top: 20px;
-
-    h4 {
-      color: var(--text-color-primary);
-      margin-bottom: 12px;
-    }
-
-    ol {
-      margin: 0;
-      padding-left: 20px;
-
-      li {
-        color: var(--text-color-secondary);
-        line-height: 1.8;
-        margin-bottom: 4px;
-      }
-    }
-  }
-}
 
 // 响应式设计
 @media (max-width: 768px) {

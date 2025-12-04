@@ -14,6 +14,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useTest } from '@/composables/useTest'
 import type { TestItemResult } from '@/types/api'
+import TestItemDetail from '@/components/TestItemDetail.vue'
 
 // 使用测试状态管理
 const {
@@ -32,6 +33,12 @@ const {
 
 // 本地状态
 const error = ref<string>('')
+
+// 新增对话框状态
+const showResultDialog = ref(false)
+const showErrorDetailDialog = ref(false)
+const selectedError = ref<any>(null)
+const activeCollapse = ref<string[]>(['config', 'todo', 'dify'])
 
 // 计算属性
 const canStartTest = computed(() => !isRunning.value)
@@ -58,26 +65,28 @@ const handleStartTest = async () => {
 
     const result = await startTest()
 
-    // 调试输出：打印完整的测试结果
-    console.log('测试结果:', result)
-    if (result.result) {
-      console.log('配置测试:', result.result.configTest)
-      console.log('配置测试错误:', result.result.configTest?.error)
-      console.log('Todo测试:', result.result.todoTest)
-      console.log('Todo测试错误:', result.result.todoTest?.error)
-      console.log('Dify测试:', result.result.difyTest)
-      console.log('Dify测试错误:', result.result.difyTest?.error)
-    }
-
     if (result.success) {
+      showResultDialog.value = true
       ElMessage.success('测试完成！')
     } else {
       throw new Error(result.error || '测试失败')
     }
   } catch (err: any) {
-    error.value = err.message || '测试执行失败'
-    ElMessage.error(`测试失败: ${error.value}`)
+    const error = err as Error
+    ElMessage.error(`测试失败: ${error.message}`)
   }
+}
+
+// 重新测试
+const handleRetest = () => {
+  showResultDialog.value = false
+  handleStartTest()
+}
+
+// 显示错误详情
+const showErrorDetail = (errorItem: any) => {
+  selectedError.value = errorItem
+  showErrorDetailDialog.value = true
 }
 
 // 重置测试
@@ -118,224 +127,170 @@ const showDetailedError = async (item: TestItemResult) => {
         </p>
       </div>
 
-      <!-- 主要内容区 - 使用Grid布局 -->
+      <!-- 主要内容区 -->
       <div class="main-section">
-        <!-- 左侧：测试控制 -->
-        <div class="left-panel">
-          <el-card class="test-control-card" shadow="hover">
-            <div class="card-content">
-              <div class="test-icon">
-                <el-icon size="60" color="#409EFF">
-                  <Tools />
-                </el-icon>
-              </div>
+        <!-- 测试控制卡片 -->
+        <el-card class="test-control-card" shadow="hover">
+          <div class="card-content">
+            <div class="test-icon">
+              <el-icon size="60" color="#409EFF">
+                <Tools />
+              </el-icon>
+            </div>
 
-              <div class="test-text">
-                <h3>系统配置测试</h3>
-                <p>验证配置文件格式、Microsoft Todo连接和Dify服务状态</p>
-              </div>
+            <div class="test-text">
+              <h3>系统配置测试</h3>
+              <p>验证配置文件格式、Microsoft Todo连接和Dify服务状态</p>
+            </div>
 
-              <!-- 错误提示 -->
-              <el-alert
-                v-if="error"
-                :title="error"
-                type="error"
-                show-icon
-                :closable="false"
-                class="error-alert"
+            <!-- 错误提示 -->
+            <el-alert
+              v-if="error"
+              :title="error"
+              type="error"
+              show-icon
+              :closable="false"
+              class="error-alert"
+            />
+
+            <!-- 进度条 -->
+            <div v-if="isRunning || progress > 0" class="progress-section">
+              <div class="progress-info">
+                <span class="current-test">{{ currentTest }}</span>
+                <span class="progress-percent">{{ progress }}%</span>
+              </div>
+              <el-progress
+                :percentage="progress"
+                :status="isRunning ? undefined : (hasTestPassed() ? 'success' : 'exception')"
+                :stroke-width="6"
               />
-
-              <!-- 进度条 -->
-              <div v-if="isRunning || progress > 0" class="progress-section">
-                <div class="progress-info">
-                  <span class="current-test">{{ currentTest }}</span>
-                  <span class="progress-percent">{{ progress }}%</span>
-                </div>
-                <el-progress
-                  :percentage="progress"
-                  :status="isRunning ? undefined : (hasTestPassed() ? 'success' : 'exception')"
-                  :stroke-width="6"
-                />
-                <div class="progress-message">{{ progressMessage }}</div>
-              </div>
-
-              <!-- 操作按钮 -->
-              <div class="action-buttons">
-                <el-button
-                  type="primary"
-                  size="large"
-                  :loading="isRunning"
-                  :disabled="!canStartTest"
-                  @click="handleStartTest"
-                >
-                  <el-icon><Connection /></el-icon>
-                  {{ isRunning ? '测试中...' : '开始测试' }}
-                </el-button>
-
-                <el-button
-                  size="large"
-                  :disabled="isRunning"
-                  @click="handleResetTest"
-                >
-                  <el-icon><Refresh /></el-icon>
-                  重置
-                </el-button>
-              </div>
+              <div class="progress-message">{{ progressMessage }}</div>
             </div>
-          </el-card>
-        </div>
 
-        <!-- 右侧：测试结果 - 直接显示 -->
-        <div class="right-panel">
-          <el-card v-if="showResults" class="result-card compact" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <el-icon :color="hasTestPassed() ? '#67C23A' : '#F56C6C'">
-                  <component :is="hasTestPassed() ? SuccessFilled : CircleCloseFilled" />
-                </el-icon>
-                <span>测试结果</span>
-                <el-tag :type="hasTestPassed() ? 'success' : 'danger'" size="small">
-                  {{ hasTestPassed() ? '通过' : '失败' }}
-                </el-tag>
-              </div>
-            </template>
+            <!-- 操作按钮 -->
+            <div class="action-buttons">
+              <el-button
+                type="primary"
+                size="large"
+                :loading="isRunning"
+                :disabled="!canStartTest"
+                @click="handleStartTest"
+              >
+                <el-icon><Connection /></el-icon>
+                {{ isRunning ? '测试中...' : '开始测试' }}
+              </el-button>
 
-            <div class="result-content">
-              <!-- 紧凑的总体信息 -->
-              <div class="overall-info-compact">
-                <div class="info-row">
-                  <span class="label">总体状态:</span>
-                  <el-tag :type="hasTestPassed() ? 'success' : 'danger'" size="small">
-                    {{ hasTestPassed() ? '测试通过' : '测试失败' }}
-                  </el-tag>
-                </div>
-                <div class="info-row">
-                  <span class="label">总耗时:</span>
-                  <span class="value">{{ formatDuration(testResult?.duration || 0) }}</span>
-                </div>
-              </div>
-
-              <!-- 紧凑的测试结果项 -->
-              <div class="test-items-compact">
-                <!-- 配置文件验证 -->
-                <div v-if="testResult?.configTest" class="test-item-compact">
-                  <div class="item-header">
-                    <el-icon :color="getTestItemIcon(testResult.configTest).color" size="16">
-                      <DocumentChecked />
-                    </el-icon>
-                    <span class="item-name">{{ testResult.configTest.name }}</span>
-                    <el-tag
-                      :type="testResult.configTest.success ? 'success' : 'danger'"
-                      size="small"
-                    >
-                      {{ getTestItemStatus(testResult.configTest) }}
-                    </el-tag>
-                  </div>
-                  <!-- 失败时直接显示错误信息 -->
-                  <div v-if="!testResult.configTest.success && testResult.configTest.error" class="error-info-compact">
-                    <div class="error-content">
-                      <el-icon color="#F56C6C" size="14"><WarningFilled /></el-icon>
-                      <span class="error-text">{{ testResult.configTest.error }}</span>
-                    </div>
-                    <el-button
-                      type="text"
-                      size="small"
-                      @click="showDetailedError(testResult.configTest)"
-                      class="detail-btn"
-                      title="查看详细错误信息"
-                    >
-                      <el-icon size="12"><View /></el-icon>
-                    </el-button>
-                  </div>
-                </div>
-
-                <!-- Microsoft Todo 服务测试 -->
-                <div v-if="testResult?.todoTest" class="test-item-compact">
-                  <div class="item-header">
-                    <el-icon :color="getTestItemIcon(testResult.todoTest).color" size="16">
-                      <Connection />
-                    </el-icon>
-                    <span class="item-name">{{ testResult.todoTest.name }}</span>
-                    <el-tag
-                      :type="testResult.todoTest.success ? 'success' : 'danger'"
-                      size="small"
-                    >
-                      {{ getTestItemStatus(testResult.todoTest) }}
-                    </el-tag>
-                  </div>
-                  <!-- 失败时直接显示错误信息 -->
-                  <div v-if="!testResult.todoTest.success && testResult.todoTest.error" class="error-info-compact">
-                    <div class="error-content">
-                      <el-icon color="#F56C6C" size="14"><WarningFilled /></el-icon>
-                      <span class="error-text">{{ testResult.todoTest.error }}</span>
-                    </div>
-                    <el-button
-                      type="text"
-                      size="small"
-                      @click="showDetailedError(testResult.todoTest)"
-                      class="detail-btn"
-                      title="查看详细错误信息"
-                    >
-                      <el-icon size="12"><View /></el-icon>
-                    </el-button>
-                  </div>
-                </div>
-
-                <!-- Dify 服务测试 -->
-                <div v-if="testResult?.difyTest" class="test-item-compact">
-                  <div class="item-header">
-                    <el-icon :color="getTestItemIcon(testResult.difyTest).color" size="16">
-                      <Setting />
-                    </el-icon>
-                    <span class="item-name">{{ testResult.difyTest.name }}</span>
-                    <el-tag
-                      :type="testResult.difyTest.success ? 'success' : 'warning'"
-                      size="small"
-                    >
-                      {{ getTestItemStatus(testResult.difyTest) }}
-                    </el-tag>
-                  </div>
-                  <!-- 失败时直接显示错误信息 -->
-                  <div v-if="!testResult.difyTest.success && testResult.difyTest.error" class="error-info-compact">
-                    <div class="error-content">
-                      <el-icon color="#F56C6C" size="14"><WarningFilled /></el-icon>
-                      <span class="error-text">{{ testResult.difyTest.error }}</span>
-                    </div>
-                    <el-button
-                      type="text"
-                      size="small"
-                      @click="showDetailedError(testResult.difyTest)"
-                      class="detail-btn"
-                      title="查看详细错误信息"
-                    >
-                      <el-icon size="12"><View /></el-icon>
-                    </el-button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 建议操作 -->
-              <div class="suggestions-compact">
-                <el-alert
-                  v-if="hasTestPassed()"
-                  title="所有测试通过"
-                  type="success"
-                  show-icon
-                  :closable="false"
-                />
-                <el-alert
-                  v-else
-                  title="部分测试失败"
-                  type="warning"
-                  show-icon
-                  :closable="false"
-                />
-              </div>
+              <el-button
+                size="large"
+                :disabled="isRunning"
+                @click="handleResetTest"
+              >
+                <el-icon><Refresh /></el-icon>
+                重置
+              </el-button>
             </div>
-          </el-card>
-        </div>
+          </div>
+        </el-card>
       </div>
     </div>
+
+    <!-- 测试结果对话框 -->
+    <el-dialog
+      v-model="showResultDialog"
+      title="测试结果"
+      width="800px"
+      :close-on-click-modal="false"
+    >
+      <div class="test-result-content">
+        <!-- 总体状态 -->
+        <div class="overall-status">
+          <el-result
+            :icon="hasTestPassed() ? 'success' : 'error'"
+            :title="hasTestPassed() ? '测试通过' : '测试失败'"
+            :sub-title="`总耗时: ${formatDuration(testResult?.duration || 0)}`"
+          >
+            <template #extra>
+              <el-tag :type="hasTestPassed() ? 'success' : 'danger'" size="large">
+                {{ hasTestPassed() ? '所有测试项通过' : '存在失败的测试项' }}
+              </el-tag>
+            </template>
+          </el-result>
+        </div>
+
+        <!-- 详细测试结果 -->
+        <div class="detailed-results">
+          <el-collapse v-model="activeCollapse">
+            <!-- 配置文件验证 -->
+            <el-collapse-item
+              v-if="testResult?.configTest"
+              title="配置文件验证"
+              name="config"
+            >
+              <test-item-detail
+                :test-item="testResult.configTest"
+                @show-error="showErrorDetail"
+              />
+            </el-collapse-item>
+
+            <!-- Microsoft Todo 服务测试 -->
+            <el-collapse-item
+              v-if="testResult?.todoTest"
+              title="Microsoft Todo 服务测试"
+              name="todo"
+            >
+              <test-item-detail
+                :test-item="testResult.todoTest"
+                @show-error="showErrorDetail"
+              />
+            </el-collapse-item>
+
+            <!-- Dify 服务测试 -->
+            <el-collapse-item
+              v-if="testResult?.difyTest"
+              title="Dify 服务测试"
+              name="dify"
+            >
+              <test-item-detail
+                :test-item="testResult.difyTest"
+                @show-error="showErrorDetail"
+              />
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="showResultDialog = false">关闭</el-button>
+        <el-button v-if="!hasTestPassed()" type="primary" @click="handleRetest">重新测试</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 错误详情对话框 -->
+    <el-dialog
+      v-model="showErrorDetailDialog"
+      title="错误详情"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <div class="error-detail-content">
+        <el-alert
+          :title="selectedError?.name || '错误'"
+          type="error"
+          :description="selectedError?.message || '未知错误'"
+          show-icon
+          :closable="false"
+        />
+
+        <div v-if="selectedError?.details" class="error-details">
+          <h4>详细信息</h4>
+          <pre>{{ selectedError.details }}</pre>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="showErrorDetailDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -344,17 +299,15 @@ const showDetailedError = async (item: TestItemResult) => {
   height: 100%;
   width: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   padding: 20px;
+  overflow-y: auto;
 }
 
 .test-content {
-  max-width: 1200px;
+  max-width: 800px;
   width: 100%;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+  margin: 0 auto;
 }
 
 .page-header {
@@ -382,26 +335,12 @@ const showDetailedError = async (item: TestItemResult) => {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  flex: 1;
-  align-items: stretch;
-  min-height: 0;
+  width: 100%;
 }
 
-.left-panel, .right-panel {
-  min-height: 0;
-}
-
-.test-control-card, .result-card {
+.test-control-card {
   height: fit-content;
   min-height: 300px;
-  max-height: none;
-  overflow-y: auto;
-
-  &.compact {
-    .card-content {
-      padding: 16px;
-    }
-  }
 
   .card-content {
     display: flex;
@@ -409,15 +348,6 @@ const showDetailedError = async (item: TestItemResult) => {
     align-items: center;
     gap: 16px;
     text-align: center;
-  }
-
-  .card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    color: var(--text-color-primary);
-    font-size: 14px;
   }
 }
 
@@ -477,123 +407,44 @@ const showDetailedError = async (item: TestItemResult) => {
   flex-wrap: wrap;
 }
 
-.result-content {
-  width: 100%;
+.test-result-content {
+  .overall-status {
+    margin-bottom: 24px;
+  }
 
-  .overall-info-compact {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 16px;
-    padding: 8px;
-    background-color: var(--background-color-light);
-    border-radius: 4px;
+  .detailed-results {
+    .el-collapse {
+      border: none;
 
-    .info-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-
-      .label {
-        font-size: 13px;
-        color: var(--text-color-secondary);
-      }
-
-      .value {
-        font-size: 13px;
-        color: var(--text-color-primary);
+      :deep(.el-collapse-item__header) {
         font-weight: 500;
       }
     }
   }
+}
 
-  .test-items-compact {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 16px;
+.error-detail-content {
+  .error-details {
+    margin-top: 20px;
 
-    .test-item-compact {
-      padding: 12px;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      background-color: var(--background-color-light);
-
-      .item-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 8px;
-
-        .item-name {
-          font-weight: 500;
-          color: var(--text-color-primary);
-          font-size: 13px;
-          flex: 1;
-        }
-      }
-
-      .error-info-compact {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        padding: 8px;
-        background-color: #FEF0F0;
-        border: 1px solid #F56C6C;
-        border-radius: 4px;
-
-        .error-content {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-
-          .error-text {
-            font-size: 12px;
-            color: #F56C6C;
-            line-height: 1.3;
-            word-break: break-all;
-          }
-        }
-
-        .detail-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 4px;
-          color: #F56C6C;
-          background-color: transparent;
-          border: 1px solid #F56C6C;
-          border-radius: 3px;
-          font-size: 12px;
-          transition: all 0.2s ease;
-          min-width: 24px;
-          height: 24px;
-
-          &:hover {
-            background-color: #F56C6C;
-            color: white;
-          }
-        }
-      }
+    h4 {
+      margin-bottom: 12px;
+      color: var(--el-text-color-primary);
     }
-  }
 
-  .suggestions-compact {
-    .el-alert {
-      :deep(.el-alert__description) {
-        display: none;
-      }
+    pre {
+      background-color: var(--el-fill-color-lighter);
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-x: auto;
+      margin: 0;
     }
   }
 }
 
 // 响应式设计
-@media (max-width: 1024px) {
-  .main-section {
-    gap: 16px;
-  }
-}
-
 @media (max-width: 768px) {
   .test-container {
     padding: 16px;
@@ -611,24 +462,33 @@ const showDetailedError = async (item: TestItemResult) => {
       width: 100%;
     }
   }
+}
 
-  .overall-info-compact {
-    flex-direction: column;
-    gap: 8px;
+// 对话框响应式
+:deep(.el-dialog) {
+  @media (max-width: 768px) {
+    width: 90% !important;
+    margin: 5vh auto;
+  }
+
+  @media (max-width: 480px) {
+    width: 95% !important;
+    margin: 2vh auto;
   }
 }
 
-// 动画效果
-.test-item-compact {
-  transition: all 0.3s ease;
+// 测试结果对话框特殊处理
+.test-result-dialog {
+  :deep(.el-dialog) {
+    @media (max-width: 768px) {
+      width: 95% !important;
+      height: 80vh;
 
-  &:hover {
-    border-color: var(--color-primary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      .el-dialog__body {
+        max-height: calc(80vh - 120px);
+        overflow-y: auto;
+      }
+    }
   }
-}
-
-.el-progress {
-  transition: all 0.3s ease;
 }
 </style>

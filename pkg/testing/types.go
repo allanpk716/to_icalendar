@@ -27,11 +27,6 @@ type TestItemResult struct {
 	Duration time.Duration `json:"duration"`
 }
 
-// ConfigValidator 配置验证器接口
-type ConfigValidator interface {
-	ValidateConfig() error
-}
-
 // ConnectionTester 连接测试器接口
 type ConnectionTester interface {
 	TestConnection() error
