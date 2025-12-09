@@ -2,19 +2,9 @@
 import { useClipboardUpload } from '@/composables/useClipboardUpload'
 import { useResponsiveDialog } from '@/composables/useResponsiveDialog'
 import type { ProcessResult } from '@/types'
-import {
-    CircleCloseFilled,
-    DocumentCopy,
-    Loading,
-    Picture,
-    QuestionFilled,
-    Refresh,
-    SuccessFilled,
-    Tools,
-    WarningFilled
-} from '@element-plus/icons-vue'
+import { DocumentCopy, Loading, Picture, QuestionFilled, Refresh, SuccessFilled, Tools } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 // 使用剪贴板上传功能
 const {
@@ -40,13 +30,12 @@ const { calculateDialogWidth } = useResponsiveDialog()
 // 本地状态
 const showImageDialog = ref(false)
 const showProgressDialog = ref(false)
-const progressActiveTab = ref('progress')
 const showResultDialog = ref(false)
+const legacyResultDialog = ref(false)
 const showErrorDetailDialog = ref(false)
 const selectedError = ref<ProcessResult | null>(null)
 const autoRefresh = ref(false)
 const refreshInterval = ref<number>()
-const logContainer = ref<HTMLElement>()
 const imageError = ref(false)
 const isUserOperation = ref(false)
 const showLogDrawer = ref(false)
@@ -69,61 +58,7 @@ const resultDialogWidth = computed(() => calculateDialogWidth(600, 800))
 const errorDialogWidth = computed(() => calculateDialogWidth(500, 700))
 const progressDialogWidth = computed(() => calculateDialogWidth(500, 700))
 
-// 进度相关计算属性
-const progressPercentage = computed(() => {
-  // 确保进度基于实际的处理状态
-  if (!isProcessing.value && progress.step === 0) return 0
 
-  // 基于步骤计算百分比，确保与任务状态同步
-  const percentage = Math.min(100, Math.max(0, progress.step * (100 / 6)))
-
-  // 如果处理完成且有结果，确保显示100%
-  if (!isProcessing.value && processResult.value && processResult.value.success) {
-    return 100
-  }
-
-  return Math.round(percentage)
-})
-
-const progressStatus = computed(() => {
-  // 如果有处理结果，根据结果显示状态
-  if (processResult.value) {
-    if (processResult.value.success) {
-      return 'success'
-    } else {
-      return 'exception'
-    }
-  }
-
-  // 处理成功完成时显示成功状态（基于进度）
-  if (progress.step >= 6) {
-    return 'success'
-  }
-
-  // 正在处理中，不显示特定状态
-  if (isProcessing.value) {
-    return undefined
-  }
-
-  // 未开始处理
-  return undefined
-})
-
-// 获取错误类型图标和颜色
-const getErrorTypeInfo = (errorType?: string) => {
-  switch (errorType) {
-    case 'config':
-      return { icon: WarningFilled, color: '#E6A23C', text: '配置错误' }
-    case 'network':
-      return { icon: WarningFilled, color: '#E6A23C', text: '网络错误' }
-    case 'parsing':
-      return { icon: CircleCloseFilled, color: '#F56C6C', text: '解析错误' }
-    case 'api':
-      return { icon: WarningFilled, color: '#E6A23C', text: 'API错误' }
-    default:
-      return { icon: CircleCloseFilled, color: '#F56C6C', text: '未知错误' }
-  }
-}
 
 // 获取剪贴板图片
 const handleGetClipboard = async () => {
@@ -157,7 +92,6 @@ const handleProcessUpload = async () => {
   isUserOperation.value = true
   autoRefresh.value = false
   showProgressDialog.value = true
-  progressActiveTab.value = 'progress'
 
   try {
     const taskID = await processImageToTodo()
@@ -222,14 +156,6 @@ watch(autoRefresh, (newVal) => {
   }
 })
 
-// 监听日志变化，自动滚动到底部
-watch(logs, () => {
-  nextTick(() => {
-    if (logContainer.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight
-    }
-  })
-}, { deep: true })
 
 // 监听页面可见性变化
 const handleVisibilityChange = () => {
@@ -272,7 +198,27 @@ onUnmounted(() => {
   }
 })
 
-// 获取优先级类型
+// 重新尝试处理
+const handleRetry = async () => {
+  showResultDialog.value = false
+  await handleProcessUpload()
+}
+
+const getErrorTypeInfo = (errorType?: string) => {
+  switch (errorType) {
+    case 'config':
+      return { icon: QuestionFilled, color: '#E6A23C', text: '配置错误' }
+    case 'network':
+      return { icon: QuestionFilled, color: '#E6A23C', text: '网络错误' }
+    case 'parsing':
+      return { icon: QuestionFilled, color: '#F56C6C', text: '解析错误' }
+    case 'api':
+      return { icon: QuestionFilled, color: '#E6A23C', text: 'API错误' }
+    default:
+      return { icon: QuestionFilled, color: '#F56C6C', text: '未知错误' }
+  }
+}
+
 const getPriorityType = (priority: string) => {
   switch (priority?.toLowerCase()) {
     case 'high':
@@ -286,64 +232,15 @@ const getPriorityType = (priority: string) => {
   }
 }
 
-// 显示错误详情
 const showErrorDetail = (error: ProcessResult) => {
   selectedError.value = error
   showErrorDetailDialog.value = true
 }
 
-// 重新尝试处理
-const handleRetry = async () => {
-  showResultDialog.value = false
-  showErrorDetailDialog.value = false
-  await handleProcessUpload()
-}
-
-// 格式化处理时间
 const formatDuration = (duration?: number) => {
   if (!duration) return ''
-  if (duration < 1000) {
-    return `${duration}ms`
-  }
+  if (duration < 1000) return `${duration}ms`
   return `${(duration / 1000).toFixed(1)}s`
-}
-
-// 获取步骤状态
-const getStepStatus = (stepIndex: number) => {
-  if (processResult.value) {
-    if (processResult.value.success) return 'finish'
-    if (stepIndex < progress.step - 1) return 'finish'
-    if (stepIndex === progress.step - 1) return 'error'
-    return 'wait'
-  }
-
-  if (isProcessing.value) {
-    if (stepIndex < progress.step - 1) return 'finish'
-    if (stepIndex === progress.step - 1) return 'process'
-    return 'wait'
-  }
-
-  if (progress.step >= 6) return 'finish'
-  if (progress.step > 0) {
-    if (stepIndex < progress.step) return 'finish'
-    return 'wait'
-  }
-  return 'wait'
-}
-
-// 获取步骤图标
-const getStepIcon = (stepIndex: number) => {
-  const status = getStepStatus(stepIndex)
-  switch (status) {
-    case 'finish':
-      return SuccessFilled
-    case 'process':
-      return Loading
-    case 'error':
-      return CircleCloseFilled
-    default:
-      return undefined
-  }
 }
 </script>
 
@@ -351,12 +248,8 @@ const getStepIcon = (stepIndex: number) => {
   <div class="clipboard-view">
     <!-- 配置状态提示 -->
     <div v-if="!configStatus.ready" class="config-status-banner">
-      <el-alert
-        :title="configStatus.error || '配置未就绪'"
-        :type="configStatus.configExists ? 'warning' : 'error'"
-        :closable="false"
-        show-icon
-      >
+      <el-alert :title="configStatus.error || '配置未就绪'" :type="configStatus.configExists ? 'warning' : 'error'"
+        :closable="false" show-icon>
         <template #default>
           <div v-if="configStatus.suggestions && configStatus.suggestions.length > 0">
             <p>建议：</p>
@@ -380,8 +273,8 @@ const getStepIcon = (stepIndex: number) => {
           获取剪贴板图片
         </el-button>
 
-        <el-button type="success" :icon="Tools" @click="handleProcessUpload" :disabled="!canProcess || !configStatus.ready"
-          :loading="isProcessing">
+        <el-button type="success" :icon="Tools" @click="handleProcessUpload"
+          :disabled="!canProcess || !configStatus.ready" :loading="isProcessing">
           {{ processButtonText }}
         </el-button>
 
@@ -389,7 +282,7 @@ const getStepIcon = (stepIndex: number) => {
         <el-button @click="showLogDrawer = true" :loading="isProcessing">日志</el-button>
       </div>
 
-      </div>
+    </div>
 
     <!-- 主内容区域 -->
     <div class="main-content">
@@ -420,7 +313,7 @@ const getStepIcon = (stepIndex: number) => {
         </el-card>
       </div>
 
-      
+
     </div>
 
     <!-- 图片预览对话框 -->
@@ -428,125 +321,21 @@ const getStepIcon = (stepIndex: number) => {
       <el-image v-if="previewUrl" :src="previewUrl" fit="contain" style="width: 100%; max-height: 70vh;" />
     </el-dialog>
 
-    <el-dialog
-      v-model="showProgressDialog"
-      title="处理进度"
-      :width="progressDialogWidth"
-      :center="true"
-      :close-on-click-modal="false"
-    >
-      <el-tabs v-model="progressActiveTab">
-        <el-tab-pane label="进度" name="progress">
-          <div class="progress-card">
-            <el-steps
-              :active="progress.step"
-              direction="vertical"
-              finish-status="success"
-              :process-status="isProcessing ? 'process' : 'wait'"
-              align-center
-            >
-              <el-step title="解码图片" description="解码剪贴板图片数据" :status="getStepStatus(0)" :icon="getStepIcon(0)" />
-              <el-step title="上传AI服务" description="上传图片到Dify AI服务" :status="getStepStatus(1)" :icon="getStepIcon(1)" />
-              <el-step title="AI分析" description="AI正在分析图片内容" :status="getStepStatus(2)" :icon="getStepIcon(2)" />
-              <el-step title="解析结果" description="解析AI响应结果" :status="getStepStatus(3)" :icon="getStepIcon(3)" />
-              <el-step title="创建Todo任务" description="在Microsoft Todo创建任务" :status="getStepStatus(4)" :icon="getStepIcon(4)" />
-              <el-step title="完成" description="处理完成" :status="getStepStatus(5)" :icon="getStepIcon(5)" />
-            </el-steps>
+    <ProgressDialog v-model="showProgressDialog" :is-processing="isProcessing" :progress="progress" :logs="logs"
+      :process-result="processResult" :width="progressDialogWidth" />
 
-            <div v-if="progress.message" class="progress-message">
-              <el-icon class="is-loading" v-if="isProcessing">
-                <Loading />
-              </el-icon>
-              <el-icon v-else-if="processResult && processResult.success" class="success-icon">
-                <SuccessFilled />
-              </el-icon>
-              {{ progress.message }}
-            </div>
-
-            <div v-if="isProcessing || processResult || progress.step > 0" class="realtime-progress">
-              <el-progress
-                :percentage="progressPercentage"
-                :status="progressStatus"
-                :stroke-width="8"
-                :show-text="true"
-                :indeterminate="isProcessing && progressPercentage === 0"
-              >
-                <template #default="{ percentage }">
-                  <span class="progress-text">{{ Math.round(percentage) }}%</span>
-                </template>
-              </el-progress>
-
-            <div class="progress-info">
-              <div class="progress-message">
-                <el-icon class="is-loading" v-if="isProcessing">
-                  <Loading />
-                </el-icon>
-                {{ progress.message }}
-              </div>
-              <div class="progress-tips">
-                <el-text size="small" type="info">
-                  正在处理，请稍候...整个过程可能需要10-30秒
-                </el-text>
-              </div>
-            </div>
-          </div>
-          <div v-if="processResult?.parsedAnswer" class="parsed-answer">
-            <el-card header="AI解析内容" class="parsed-card">
-              <pre class="code-block">{{ processResult.parsedAnswer }}</pre>
-            </el-card>
-          </div>
-        </div>
-      </el-tab-pane>
-        <el-tab-pane label="日志" name="logs">
-          <div class="log-container" ref="logContainer">
-            <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
-              <span class="log-time">{{ log.time }}</span>
-              <span class="log-message">{{ log.message }}</span>
-            </div>
-            <div v-if="logs.length === 0" class="log-empty">暂无日志</div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
-
-      <template #footer>
-        <el-button @click="showProgressDialog = false">关闭</el-button>
-      </template>
-    </el-dialog>
-
-    <el-drawer
-      v-model="showLogDrawer"
-      title="处理日志"
-      direction="rtl"
-      size="80%"
-    >
-      <div class="action-bar" style="margin-bottom: 8px; justify-content: flex-end;">
-        <el-button type="warning" @click="clearLogs">清空日志</el-button>
-      </div>
-      <div class="log-container" ref="logContainer">
-        <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
-          <span class="log-time">{{ log.time }}</span>
-          <span class="log-message">{{ log.message }}</span>
-        </div>
-        <div v-if="logs.length === 0" class="log-empty">暂无日志</div>
-      </div>
-    </el-drawer>
+    <LogDrawer v-model="showLogDrawer" :logs="logs" @clear="clearLogs" />
 
     <!-- 处理结果对话框 -->
-    <el-dialog
-      v-model="showResultDialog"
-      title="处理结果"
-      :width="resultDialogWidth"
-      :center="true"
-      :close-on-click-modal="false"
-    >
+    <ResultDialog v-model="showResultDialog" :process-result="processResult" :width="resultDialogWidth"
+      @retry="handleRetry" @close="handleClearResult" />
+
+    <el-dialog v-model="legacyResultDialog" title="处理结果" :width="resultDialogWidth" :center="true"
+      :close-on-click-modal="false">
       <div v-if="processResult" class="result-content">
         <!-- 成功结果 -->
-        <el-result
-          v-if="processResult.success"
-          icon="success"
-          title="处理成功"
-          :sub-title="processResult.message + (processResult.duration ? ` (耗时: ${formatDuration(processResult.duration)})` : '')"
-        >
+        <el-result v-if="processResult.success" icon="success" title="处理成功"
+          :sub-title="processResult.message + (processResult.duration ? ` (耗时: ${formatDuration(processResult.duration)})` : '')">
           <template #extra>
             <el-descriptions :column="1" border>
               <el-descriptions-item label="任务标题">
@@ -571,19 +360,13 @@ const getStepIcon = (stepIndex: number) => {
         </el-result>
 
         <!-- 失败结果 -->
-        <el-result
-          v-else
-          icon="error"
-          title="处理失败"
-          :sub-title="processResult.message + (processResult.duration ? ` (耗时: ${formatDuration(processResult.duration)})` : '')"
-        >
+        <el-result v-else icon="error" title="处理失败"
+          :sub-title="processResult.message + (processResult.duration ? ` (耗时: ${formatDuration(processResult.duration)})` : '')">
           <template #extra>
             <!-- 错误类型显示 -->
             <div class="error-type-info" v-if="processResult.errorType">
-              <el-tag
-                :type="getErrorTypeInfo(processResult.errorType).color === '#F56C6C' ? 'danger' : 'warning'"
-                class="error-type-tag"
-              >
+              <el-tag :type="getErrorTypeInfo(processResult.errorType).color === '#F56C6C' ? 'danger' : 'warning'"
+                class="error-type-tag">
                 <el-icon class="tag-icon">
                   <component :is="getErrorTypeInfo(processResult.errorType).icon" />
                 </el-icon>
@@ -603,14 +386,10 @@ const getStepIcon = (stepIndex: number) => {
 
             <!-- 详细错误信息 -->
             <div class="error-detail">
-              <el-button
-                type="info"
-                plain
-                size="small"
-                @click="showErrorDetail(processResult)"
-                class="detail-button"
-              >
-                <el-icon><QuestionFilled /></el-icon>
+              <el-button type="info" plain size="small" @click="showErrorDetail(processResult)" class="detail-button">
+                <el-icon>
+                  <QuestionFilled />
+                </el-icon>
                 查看详细错误
               </el-button>
             </div>
@@ -620,11 +399,7 @@ const getStepIcon = (stepIndex: number) => {
 
       <template #footer>
         <el-button @click="handleClearResult">关闭</el-button>
-        <el-button
-          v-if="!processResult?.success && processResult?.canRetry"
-          type="warning"
-          @click="handleRetry"
-        >
+        <el-button v-if="!processResult?.success && processResult?.canRetry" type="warning" @click="handleRetry">
           重新尝试
         </el-button>
         <el-button type="primary" @click="showResultDialog = false">
@@ -634,35 +409,23 @@ const getStepIcon = (stepIndex: number) => {
     </el-dialog>
 
     <!-- 错误详情对话框 -->
-    <el-dialog
-      v-model="showErrorDetailDialog"
-      title="错误详情"
-      :width="errorDialogWidth"
-      :center="true"
-      :close-on-click-modal="false"
-    >
+    <el-dialog v-model="showErrorDetailDialog" title="错误详情" :width="errorDialogWidth" :center="true"
+      :close-on-click-modal="false">
       <div class="error-detail-content" v-if="selectedError">
         <!-- 错误类型 -->
         <div class="error-type-section">
-          <el-alert
-            :title="getErrorTypeInfo(selectedError.errorType).text"
-            type="error"
-            :description="selectedError.error"
-            show-icon
-            :closable="false"
-          />
+          <el-alert :title="getErrorTypeInfo(selectedError.errorType).text" type="error"
+            :description="selectedError.error" show-icon :closable="false" />
         </div>
 
         <!-- 解决建议 -->
         <div class="suggestions-section" v-if="selectedError.suggestions && selectedError.suggestions.length > 0">
           <h4>解决建议</h4>
           <div class="suggestions-list">
-            <div
-              v-for="(suggestion, index) in selectedError.suggestions"
-              :key="index"
-              class="suggestion-item"
-            >
-              <el-icon><SuccessFilled /></el-icon>
+            <div v-for="(suggestion, index) in selectedError.suggestions" :key="index" class="suggestion-item">
+              <el-icon>
+                <SuccessFilled />
+              </el-icon>
               <span>{{ suggestion }}</span>
             </div>
           </div>
@@ -678,11 +441,7 @@ const getStepIcon = (stepIndex: number) => {
 
       <template #footer>
         <el-button @click="showErrorDetailDialog = false">关闭</el-button>
-        <el-button
-          v-if="selectedError?.canRetry"
-          type="warning"
-          @click="handleRetry"
-        >
+        <el-button v-if="selectedError?.canRetry" type="warning" @click="handleRetry">
           重新尝试
         </el-button>
       </template>
@@ -917,26 +676,26 @@ const getStepIcon = (stepIndex: number) => {
         }
       }
 
-  .progress-tips {
-    text-align: center;
+      .progress-tips {
+        text-align: center;
+      }
+    }
   }
+
+  .parsed-answer {
+    margin-top: 12px;
   }
-}
 
-.parsed-answer {
-  margin-top: 12px;
-}
+  .parsed-card {
+    padding: 8px;
+  }
 
-.parsed-card {
-  padding: 8px;
-}
-
-.code-block {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
-}
+  .code-block {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+  }
 }
 
 .log-card {
@@ -1178,3 +937,39 @@ const getStepIcon = (stepIndex: number) => {
   }
 }
 </style>
+const getErrorTypeInfo = (errorType?: string) => {
+switch (errorType) {
+case 'config':
+return { icon: QuestionFilled, color: '#E6A23C', text: '配置错误' }
+case 'network':
+return { icon: QuestionFilled, color: '#E6A23C', text: '网络错误' }
+case 'parsing':
+return { icon: QuestionFilled, color: '#F56C6C', text: '解析错误' }
+case 'api':
+return { icon: QuestionFilled, color: '#E6A23C', text: 'API错误' }
+default:
+return { icon: QuestionFilled, color: '#F56C6C', text: '未知错误' }
+}
+}
+
+const getPriorityType = (priority: string) => {
+switch (priority?.toLowerCase()) {
+case 'high':
+return 'danger'
+case 'medium':
+return 'warning'
+case 'low':
+return 'success'
+default:
+return 'info'
+}
+}
+
+const showErrorDetail = (error: ProcessResult) => {
+selectedError.value = error
+showErrorDetailDialog.value = true
+}
+
+const formatDuration = (duration?: number) => {
+if (!duration) return ''
+if (duration < 1000) return `${duration}ms` return `${(duration / 1000).toFixed(1)}s` }
