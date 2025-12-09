@@ -66,6 +66,7 @@ export interface ProcessResult {
   suggestions?: string[]    // 解决建议
   duration?: number         // 处理耗时（毫秒）
   timestamp?: string        // 时间戳
+  parsedAnswer?: string     // AI解析原始内容
 }
 
 // 配置状态

@@ -139,17 +139,18 @@ func generateTaskID() string {
 
 // ClipUploadResult 剪贴板上传结果
 type ClipUploadResult struct {
-	Success      bool     `json:"success"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description"`
-	Message      string   `json:"message"`
-	List         string   `json:"list,omitempty"`
-	Priority     string   `json:"priority,omitempty"`
-	Error        string   `json:"error,omitempty"`
-	ErrorType    string   `json:"errorType,omitempty"`
-	CanRetry     bool     `json:"canRetry,omitempty"`
-	Suggestions  []string `json:"suggestions,omitempty"`
-	Duration     int64    `json:"duration,omitempty"`
+    Success      bool     `json:"success"`
+    Title        string   `json:"title"`
+    Description  string   `json:"description"`
+    Message      string   `json:"message"`
+    List         string   `json:"list,omitempty"`
+    Priority     string   `json:"priority,omitempty"`
+    Error        string   `json:"error,omitempty"`
+    ErrorType    string   `json:"errorType,omitempty"`
+    CanRetry     bool     `json:"canRetry,omitempty"`
+    Suggestions  []string `json:"suggestions,omitempty"`
+    Duration     int64    `json:"duration,omitempty"`
+    ParsedAnswer string   `json:"parsedAnswer,omitempty"`
 }
 
 // App 应用结构
@@ -421,16 +422,25 @@ func (a *App) processImageAsync(taskID, imageBase64 string) {
 		return
 	}
 
-	a.sendClipboardLog("success", "AI服务调用成功")
-	a.taskManager.UpdateTask(taskID, TaskStatusRunning, 60, "AI服务调用成功", "", "", "")
+    a.sendClipboardLog("success", "AI服务调用成功")
+    a.taskManager.UpdateTask(taskID, TaskStatusRunning, 60, "AI服务调用成功", "", "", "")
 
-	// 步骤4：解析AI响应
-	a.taskManager.UpdateTask(taskID, TaskStatusRunning, 70, "正在解析AI响应...", "", "", "")
-	reminder, err := commands.ParseDifyResponseToReminder(difyResponse, "image", "[图片内容]")
-	if err != nil {
-		a.taskManager.UpdateTask(taskID, TaskStatusFailed, 0, "解析AI响应失败", "", "", err.Error())
-		a.sendClipboardLog("error", fmt.Sprintf("解析AI响应失败: %v", err))
-		return
+    // 步骤4：解析AI响应
+    a.taskManager.UpdateTask(taskID, TaskStatusRunning, 70, "正在解析AI响应...", "", "", "")
+    rawAnswer := ""
+    if difyResponse.Answer != "" {
+        rawAnswer = difyResponse.Answer
+    } else if difyResponse.Data != nil && difyResponse.Data.Outputs != nil {
+        rawAnswer = difyResponse.Data.Outputs.Text
+    }
+    if rawAnswer != "" {
+        a.sendClipboardLog("info", fmt.Sprintf("AI响应内容: %s", rawAnswer))
+    }
+    reminder, err := commands.ParseDifyResponseToReminder(difyResponse, "image", "[图片内容]")
+    if err != nil {
+        a.taskManager.UpdateTask(taskID, TaskStatusFailed, 0, "解析AI响应失败", "", "", err.Error())
+        a.sendClipboardLog("error", fmt.Sprintf("解析AI响应失败: %v", err))
+        return
 	}
 
 	a.sendClipboardLog("info", fmt.Sprintf("解析任务信息: %s", reminder.Title))
@@ -447,15 +457,16 @@ func (a *App) processImageAsync(taskID, imageBase64 string) {
 	}
 
 	// 完成处理
-	result := &ClipUploadResult{
-		Success:     true,
-		Title:       reminder.Title,
-		Description: reminder.Description,
-		Message:     "任务创建成功",
-		List:        reminder.List,
-		Priority:    string(reminder.Priority),
-		Duration:    time.Since(time.Now()).Milliseconds(),
-	}
+    result := &ClipUploadResult{
+        Success:     true,
+        Title:       reminder.Title,
+        Description: reminder.Description,
+        Message:     "任务创建成功",
+        List:        reminder.List,
+        Priority:    string(reminder.Priority),
+        Duration:    time.Since(time.Now()).Milliseconds(),
+        ParsedAnswer: rawAnswer,
+    }
 
 	resultJSON, _ := json.Marshal(result)
 	a.taskManager.UpdateTask(taskID, TaskStatusCompleted, 100, "任务创建成功！", string(resultJSON), "", "")

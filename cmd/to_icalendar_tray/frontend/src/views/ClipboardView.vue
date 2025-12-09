@@ -476,22 +476,27 @@ const getStepIcon = (stepIndex: number) => {
                 </template>
               </el-progress>
 
-              <div class="progress-info">
-                <div class="progress-message">
-                  <el-icon class="is-loading" v-if="isProcessing">
-                    <Loading />
-                  </el-icon>
-                  {{ progress.message }}
-                </div>
-                <div class="progress-tips">
-                  <el-text size="small" type="info">
-                    正在处理，请稍候...整个过程可能需要10-30秒
-                  </el-text>
-                </div>
+            <div class="progress-info">
+              <div class="progress-message">
+                <el-icon class="is-loading" v-if="isProcessing">
+                  <Loading />
+                </el-icon>
+                {{ progress.message }}
+              </div>
+              <div class="progress-tips">
+                <el-text size="small" type="info">
+                  正在处理，请稍候...整个过程可能需要10-30秒
+                </el-text>
               </div>
             </div>
           </div>
-        </el-tab-pane>
+          <div v-if="processResult?.parsedAnswer" class="parsed-answer">
+            <el-card header="AI解析内容" class="parsed-card">
+              <pre class="code-block">{{ processResult.parsedAnswer }}</pre>
+            </el-card>
+          </div>
+        </div>
+      </el-tab-pane>
         <el-tab-pane label="日志" name="logs">
           <div class="log-container" ref="logContainer">
             <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
@@ -557,6 +562,9 @@ const getStepIcon = (stepIndex: number) => {
                 <el-tag :type="getPriorityType(processResult.priority)">
                   {{ processResult.priority }}
                 </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="AI解析内容" v-if="processResult.parsedAnswer">
+                <pre class="code-block">{{ processResult.parsedAnswer }}</pre>
               </el-descriptions-item>
             </el-descriptions>
           </template>
@@ -909,11 +917,26 @@ const getStepIcon = (stepIndex: number) => {
         }
       }
 
-      .progress-tips {
-        text-align: center;
-      }
-    }
+  .progress-tips {
+    text-align: center;
   }
+  }
+}
+
+.parsed-answer {
+  margin-top: 12px;
+}
+
+.parsed-card {
+  padding: 8px;
+}
+
+.code-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+}
 }
 
 .log-card {
@@ -945,6 +968,7 @@ const getStepIcon = (stepIndex: number) => {
   gap: 12px;
   margin-bottom: 4px;
   line-height: 1.5;
+  color: var(--el-text-color-primary);
 
   .log-time {
     flex-shrink: 0;
