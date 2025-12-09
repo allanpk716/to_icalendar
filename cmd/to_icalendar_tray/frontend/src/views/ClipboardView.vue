@@ -38,6 +38,7 @@ const { calculateDialogWidth } = useResponsiveDialog()
 
 // 本地状态
 const showImageDialog = ref(false)
+const showProgressDialog = ref(false)
 const showResultDialog = ref(false)
 const showErrorDetailDialog = ref(false)
 const selectedError = ref<ProcessResult | null>(null)
@@ -63,6 +64,7 @@ const processButtonText = computed(() => isProcessing.value ? '处理中...' : '
 // 计算对话框宽度
 const resultDialogWidth = computed(() => calculateDialogWidth(600, 800))
 const errorDialogWidth = computed(() => calculateDialogWidth(500, 700))
+const progressDialogWidth = computed(() => calculateDialogWidth(500, 700))
 
 // 进度相关计算属性
 const progressPercentage = computed(() => {
@@ -151,6 +153,7 @@ const handleProcessUpload = async () => {
   // 设置用户操作标识，禁用剪贴板操作
   isUserOperation.value = true
   autoRefresh.value = false
+  showProgressDialog.value = true
 
   try {
     const taskID = await processImageToTodo()
@@ -414,94 +417,6 @@ const getStepIcon = (stepIndex: number) => {
 
       <!-- 右侧：处理信息 -->
       <div class="process-section">
-        <!-- 进度显示 -->
-        <el-card header="处理进度" class="progress-card">
-          <el-steps
-            :active="progress.step"
-            direction="vertical"
-            finish-status="success"
-            :process-status="isProcessing ? 'process' : 'wait'"
-            align-center
-          >
-            <el-step
-              title="解码图片"
-              description="解码剪贴板图片数据"
-              :status="getStepStatus(0)"
-              :icon="getStepIcon(0)"
-            />
-            <el-step
-              title="上传AI服务"
-              description="上传图片到Dify AI服务"
-              :status="getStepStatus(1)"
-              :icon="getStepIcon(1)"
-            />
-            <el-step
-              title="AI分析"
-              description="AI正在分析图片内容"
-              :status="getStepStatus(2)"
-              :icon="getStepIcon(2)"
-            />
-            <el-step
-              title="解析结果"
-              description="解析AI响应结果"
-              :status="getStepStatus(3)"
-              :icon="getStepIcon(3)"
-            />
-            <el-step
-              title="创建Todo任务"
-              description="在Microsoft Todo创建任务"
-              :status="getStepStatus(4)"
-              :icon="getStepIcon(4)"
-            />
-            <el-step
-              title="完成"
-              description="处理完成"
-              :status="getStepStatus(5)"
-              :icon="getStepIcon(5)"
-            />
-          </el-steps>
-
-          <div v-if="progress.message" class="progress-message">
-            <el-icon class="is-loading" v-if="isProcessing">
-              <Loading />
-            </el-icon>
-            <el-icon v-else-if="processResult && processResult.success" class="success-icon">
-              <SuccessFilled />
-            </el-icon>
-            {{ progress.message }}
-          </div>
-
-          <!-- 实时进度条 -->
-          <div v-if="isProcessing || processResult || progress.step > 0" class="realtime-progress">
-            <el-progress
-              :percentage="progressPercentage"
-              :status="progressStatus"
-              :stroke-width="8"
-              :show-text="true"
-              :indeterminate="isProcessing && progressPercentage === 0"
-            >
-              <template #default="{ percentage }">
-                <span class="progress-text">{{ Math.round(percentage) }}%</span>
-              </template>
-            </el-progress>
-
-            <div class="progress-info">
-              <div class="progress-message">
-                <el-icon class="is-loading" v-if="isProcessing">
-                  <Loading />
-                </el-icon>
-                {{ progress.message }}
-              </div>
-              <div class="progress-tips">
-                <el-text size="small" type="info">
-                  正在处理，请稍候...整个过程可能需要10-30秒
-                </el-text>
-              </div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 日志输出 -->
         <el-card header="处理日志" class="log-card">
           <div class="log-container" ref="logContainer">
             <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
@@ -519,6 +434,73 @@ const getStepIcon = (stepIndex: number) => {
     <!-- 图片预览对话框 -->
     <el-dialog v-model="showImageDialog" title="图片预览" width="80%" :center="true">
       <el-image v-if="previewUrl" :src="previewUrl" fit="contain" style="width: 100%; max-height: 70vh;" />
+    </el-dialog>
+
+    <el-dialog
+      v-model="showProgressDialog"
+      title="处理进度"
+      :width="progressDialogWidth"
+      :center="true"
+      :close-on-click-modal="false"
+    >
+      <div class="progress-card">
+        <el-steps
+          :active="progress.step"
+          direction="vertical"
+          finish-status="success"
+          :process-status="isProcessing ? 'process' : 'wait'"
+          align-center
+        >
+          <el-step title="解码图片" description="解码剪贴板图片数据" :status="getStepStatus(0)" :icon="getStepIcon(0)" />
+          <el-step title="上传AI服务" description="上传图片到Dify AI服务" :status="getStepStatus(1)" :icon="getStepIcon(1)" />
+          <el-step title="AI分析" description="AI正在分析图片内容" :status="getStepStatus(2)" :icon="getStepIcon(2)" />
+          <el-step title="解析结果" description="解析AI响应结果" :status="getStepStatus(3)" :icon="getStepIcon(3)" />
+          <el-step title="创建Todo任务" description="在Microsoft Todo创建任务" :status="getStepStatus(4)" :icon="getStepIcon(4)" />
+          <el-step title="完成" description="处理完成" :status="getStepStatus(5)" :icon="getStepIcon(5)" />
+        </el-steps>
+
+        <div v-if="progress.message" class="progress-message">
+          <el-icon class="is-loading" v-if="isProcessing">
+            <Loading />
+          </el-icon>
+          <el-icon v-else-if="processResult && processResult.success" class="success-icon">
+            <SuccessFilled />
+          </el-icon>
+          {{ progress.message }}
+        </div>
+
+        <div v-if="isProcessing || processResult || progress.step > 0" class="realtime-progress">
+          <el-progress
+            :percentage="progressPercentage"
+            :status="progressStatus"
+            :stroke-width="8"
+            :show-text="true"
+            :indeterminate="isProcessing && progressPercentage === 0"
+          >
+            <template #default="{ percentage }">
+              <span class="progress-text">{{ Math.round(percentage) }}%</span>
+            </template>
+          </el-progress>
+
+          <div class="progress-info">
+            <div class="progress-message">
+              <el-icon class="is-loading" v-if="isProcessing">
+                <Loading />
+              </el-icon>
+              {{ progress.message }}
+            </div>
+            <div class="progress-tips">
+              <el-text size="small" type="info">
+                正在处理，请稍候...整个过程可能需要10-30秒
+              </el-text>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="showProgressDialog = false">关闭</el-button>
+      </template>
     </el-dialog>
 
     <!-- 处理结果对话框 -->
