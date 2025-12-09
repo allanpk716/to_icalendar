@@ -16,7 +16,7 @@ var appIcon []byte
 
 func main() {
 	// Create an instance of the app structure
-	app := NewApp()
+	app := NewApp(appIcon)
 
 	// Create application with options - no main menu since we use systray
 	err := wails.Run(&options.App{

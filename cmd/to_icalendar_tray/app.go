@@ -160,17 +160,29 @@ type App struct {
 	serviceContainer *app.ServiceContainer
 	config           *models.ServerConfig
 	application      *app.Application
+	appIcon          []byte // 应用程序图标
+	isWindowVisible  bool   // 窗口可见状态跟踪
+	isQuitting       bool   // 退出状态跟踪
+	quitOnce         sync.Once // 确保Quit只执行一次
+	quitWG           sync.WaitGroup // 等待清理完成
+	quitDone         chan struct{} // 退出完成信号
 }
 
 // NewApp 创建应用
-func NewApp() *App {
-	return &App{}
+func NewApp(icon []byte) *App {
+	return &App{
+		appIcon:         icon,
+		isWindowVisible: false,
+		isQuitting:      false,
+		quitDone:        make(chan struct{}),
+	}
 }
 
 // OnStartup 启动应用
 func (a *App) OnStartup(ctx context.Context) {
 	a.ctx = ctx
 	a.taskManager = NewTaskManager(ctx)
+	a.isWindowVisible = true  // 启动时窗口可见
 
 	// 初始化CLI版本的应用
 	a.application = app.NewApplication()
@@ -184,11 +196,14 @@ func (a *App) OnDomReady(ctx context.Context) {
 
 // OnBeforeClose 关闭前
 func (a *App) OnBeforeClose(ctx context.Context) (prevent bool) {
-	// 关闭CLI版本的应用
-	if a.application != nil {
-		a.application.Shutdown(ctx)
+	// 如果是用户点击窗口关闭按钮且不是正在退出，隐藏到托盘
+	if !a.isQuitting {
+		a.HideWindow()
+		return true // 阻止窗口关闭，隐藏到托盘
 	}
-	return false
+
+	// 如果是调用Quit()方法触发的关闭，允许正常退出
+	return false // 允许退出
 }
 
 // OnShutdown 关闭
@@ -491,19 +506,102 @@ func (a *App) sendClipboardLog(logType, message string) {
 
 // initSystray 初始化系统托盘
 func (a *App) initSystray() {
-	// 暂时禁用系统托盘以避免崩溃
-	// TODO: 修复系统托盘图标问题后重新启用
-	/*
-	systray.SetIcon(iconData)
-	systray.SetTitle("To iCalendar")
-	systray.SetTooltip("Microsoft Todo 任务管理工具")
-
-	// 设置菜单
-	mQuit := systray.AddMenuItem("退出", "退出程序")
-
+	// 添加延迟确保Wails完全初始化，避免竞态条件
 	go func() {
-		<-mQuit.ClickedCh
-		wailsRuntime.Quit(a.ctx)
+		time.Sleep(500 * time.Millisecond)
+		a.setupSystemTray()
 	}()
-	*/
+}
+
+// setupSystemTray 配置系统托盘图标和菜单
+func (a *App) setupSystemTray() {
+	systray.Run(a.onSystrayReady, a.onSystrayExit)
+}
+
+// onSystrayReady 系统托盘准备就绪时调用
+func (a *App) onSystrayReady() {
+	// 设置图标和标题
+	systray.SetIcon(a.appIcon)
+	systray.SetTitle("to_icalendar")
+	systray.SetTooltip("to_icalendar - Microsoft Todo Reminders")
+
+	// 显示窗口菜单项
+	mShow := systray.AddMenuItem("显示窗口", "显示主窗口")
+	go func() {
+		for range mShow.ClickedCh {
+			a.ShowWindow()
+		}
+	}()
+
+	systray.AddSeparator()
+
+	// 退出菜单项
+	mQuit := systray.AddMenuItem("退出", "退出应用程序")
+	go func() {
+		for range mQuit.ClickedCh {
+			a.Quit()
+		}
+	}()
+
+	// 添加调试输出，确认菜单项创建成功
+	println("系统托盘菜单初始化完成")
+}
+
+// onSystrayExit 系统托盘退出时调用
+func (a *App) onSystrayExit() {
+	println("系统托盘清理完成")
+}
+
+// ShowWindow 显示窗口
+func (a *App) ShowWindow() {
+	if !a.isWindowVisible {
+		wailsRuntime.WindowShow(a.ctx)
+		a.isWindowVisible = true
+	}
+}
+
+// HideWindow 隐藏窗口
+func (a *App) HideWindow() {
+	if a.isWindowVisible {
+		wailsRuntime.WindowHide(a.ctx)
+		a.isWindowVisible = false
+	}
+}
+
+// Show 显示窗口（别名）
+func (a *App) Show() {
+	a.ShowWindow()
+}
+
+// Hide 隐藏窗口（别名）
+func (a *App) Hide() {
+	a.HideWindow()
+}
+
+// Quit 退出应用程序
+func (a *App) Quit() {
+	a.quitOnce.Do(func() {
+		a.isQuitting = true
+		a.quitWG.Add(1)
+
+		// 先停止托盘
+		systray.Quit()
+
+		// 关闭CLI版本的应用
+		if a.application != nil {
+			go func() {
+				a.application.Shutdown(a.ctx)
+				a.quitWG.Done()
+			}()
+		} else {
+			a.quitWG.Done()
+		}
+
+		// 退出Wails应用
+		go func() {
+			a.quitWG.Wait()
+			close(a.quitDone)
+			wailsRuntime.Quit(a.ctx)
+		}()
+	})
 }
