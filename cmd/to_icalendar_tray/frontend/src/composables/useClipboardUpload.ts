@@ -1,10 +1,9 @@
-import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue'
+import type { LogMessage, ProcessResult } from '@/types'
 import { ElMessage } from 'element-plus'
+import { onMounted, reactive, ref } from 'vue'
+import { GetConfigStatus } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { useAppState } from './useAppState'
-import { useWails } from './useWails'
-import { GetConfigStatus } from '../../wailsjs/go/main/App'
-import type { ProcessResult, LogMessage, ClipUploadResult } from '@/types'
 
 // 任务状态管理
 interface TaskInfo {
@@ -118,6 +117,9 @@ export function useClipboardUpload() {
       time: new Date().toLocaleTimeString()
     }
     logs.value.push(log)
+    if (logs.value.length > 500) {
+      logs.value.shift()
+    }
   }
 
   // 优化防抖刷新
@@ -147,6 +149,9 @@ export function useClipboardUpload() {
   // 监听来自后端的日志事件，并智能更新进度状态
   EventsOn('clipboardLog', (data: LogMessage) => {
     logs.value.push(data)
+    if (logs.value.length > 500) {
+      logs.value.shift()
+    }
 
     // 根据日志内容智能更新进度状态
     if (isProcessing.value) {
@@ -357,6 +362,10 @@ export function useClipboardUpload() {
     processResult.value = null
   }
 
+  const clearLogs = () => {
+    logs.value = []
+  }
+
   // 重置处理状态（用于开始新任务前）
   const resetProcessingState = () => {
     progress.step = 0
@@ -459,6 +468,7 @@ export function useClipboardUpload() {
     getClipboardImage,
     processImageToTodo,
     clearResult,
+    clearLogs,
     resetProcessingState,
     resetAllStates,
     cleanup

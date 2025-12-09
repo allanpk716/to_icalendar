@@ -30,6 +30,7 @@ const {
   getClipboardImage,
   processImageToTodo,
   clearResult,
+  clearLogs,
   resetProcessingState
 } = useClipboardUpload()
 
@@ -39,6 +40,7 @@ const { calculateDialogWidth } = useResponsiveDialog()
 // 本地状态
 const showImageDialog = ref(false)
 const showProgressDialog = ref(false)
+const progressActiveTab = ref('progress')
 const showResultDialog = ref(false)
 const showErrorDetailDialog = ref(false)
 const selectedError = ref<ProcessResult | null>(null)
@@ -46,7 +48,8 @@ const autoRefresh = ref(false)
 const refreshInterval = ref<number>()
 const logContainer = ref<HTMLElement>()
 const imageError = ref(false)
-const isUserOperation = ref(false) // 用户操作标识
+const isUserOperation = ref(false)
+const showLogDrawer = ref(false)
 
 // 图片加载处理
 const handleImageLoad = () => {
@@ -154,6 +157,7 @@ const handleProcessUpload = async () => {
   isUserOperation.value = true
   autoRefresh.value = false
   showProgressDialog.value = true
+  progressActiveTab.value = 'progress'
 
   try {
     const taskID = await processImageToTodo()
@@ -382,6 +386,7 @@ const getStepIcon = (stepIndex: number) => {
         </el-button>
 
         <el-button :icon="Refresh" @click="handleManualRefresh" :loading="isProcessing" circle />
+        <el-button @click="showLogDrawer = true" :loading="isProcessing">日志</el-button>
       </div>
 
       </div>
@@ -415,20 +420,7 @@ const getStepIcon = (stepIndex: number) => {
         </el-card>
       </div>
 
-      <!-- 右侧：处理信息 -->
-      <div class="process-section">
-        <el-card header="处理日志" class="log-card">
-          <div class="log-container" ref="logContainer">
-            <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
-              <span class="log-time">{{ log.time }}</span>
-              <span class="log-message">{{ log.message }}</span>
-            </div>
-            <div v-if="logs.length === 0" class="log-empty">
-              暂无日志
-            </div>
-          </div>
-        </el-card>
-      </div>
+      
     </div>
 
     <!-- 图片预览对话框 -->
@@ -443,65 +435,96 @@ const getStepIcon = (stepIndex: number) => {
       :center="true"
       :close-on-click-modal="false"
     >
-      <div class="progress-card">
-        <el-steps
-          :active="progress.step"
-          direction="vertical"
-          finish-status="success"
-          :process-status="isProcessing ? 'process' : 'wait'"
-          align-center
-        >
-          <el-step title="解码图片" description="解码剪贴板图片数据" :status="getStepStatus(0)" :icon="getStepIcon(0)" />
-          <el-step title="上传AI服务" description="上传图片到Dify AI服务" :status="getStepStatus(1)" :icon="getStepIcon(1)" />
-          <el-step title="AI分析" description="AI正在分析图片内容" :status="getStepStatus(2)" :icon="getStepIcon(2)" />
-          <el-step title="解析结果" description="解析AI响应结果" :status="getStepStatus(3)" :icon="getStepIcon(3)" />
-          <el-step title="创建Todo任务" description="在Microsoft Todo创建任务" :status="getStepStatus(4)" :icon="getStepIcon(4)" />
-          <el-step title="完成" description="处理完成" :status="getStepStatus(5)" :icon="getStepIcon(5)" />
-        </el-steps>
+      <el-tabs v-model="progressActiveTab">
+        <el-tab-pane label="进度" name="progress">
+          <div class="progress-card">
+            <el-steps
+              :active="progress.step"
+              direction="vertical"
+              finish-status="success"
+              :process-status="isProcessing ? 'process' : 'wait'"
+              align-center
+            >
+              <el-step title="解码图片" description="解码剪贴板图片数据" :status="getStepStatus(0)" :icon="getStepIcon(0)" />
+              <el-step title="上传AI服务" description="上传图片到Dify AI服务" :status="getStepStatus(1)" :icon="getStepIcon(1)" />
+              <el-step title="AI分析" description="AI正在分析图片内容" :status="getStepStatus(2)" :icon="getStepIcon(2)" />
+              <el-step title="解析结果" description="解析AI响应结果" :status="getStepStatus(3)" :icon="getStepIcon(3)" />
+              <el-step title="创建Todo任务" description="在Microsoft Todo创建任务" :status="getStepStatus(4)" :icon="getStepIcon(4)" />
+              <el-step title="完成" description="处理完成" :status="getStepStatus(5)" :icon="getStepIcon(5)" />
+            </el-steps>
 
-        <div v-if="progress.message" class="progress-message">
-          <el-icon class="is-loading" v-if="isProcessing">
-            <Loading />
-          </el-icon>
-          <el-icon v-else-if="processResult && processResult.success" class="success-icon">
-            <SuccessFilled />
-          </el-icon>
-          {{ progress.message }}
-        </div>
-
-        <div v-if="isProcessing || processResult || progress.step > 0" class="realtime-progress">
-          <el-progress
-            :percentage="progressPercentage"
-            :status="progressStatus"
-            :stroke-width="8"
-            :show-text="true"
-            :indeterminate="isProcessing && progressPercentage === 0"
-          >
-            <template #default="{ percentage }">
-              <span class="progress-text">{{ Math.round(percentage) }}%</span>
-            </template>
-          </el-progress>
-
-          <div class="progress-info">
-            <div class="progress-message">
+            <div v-if="progress.message" class="progress-message">
               <el-icon class="is-loading" v-if="isProcessing">
                 <Loading />
               </el-icon>
+              <el-icon v-else-if="processResult && processResult.success" class="success-icon">
+                <SuccessFilled />
+              </el-icon>
               {{ progress.message }}
             </div>
-            <div class="progress-tips">
-              <el-text size="small" type="info">
-                正在处理，请稍候...整个过程可能需要10-30秒
-              </el-text>
+
+            <div v-if="isProcessing || processResult || progress.step > 0" class="realtime-progress">
+              <el-progress
+                :percentage="progressPercentage"
+                :status="progressStatus"
+                :stroke-width="8"
+                :show-text="true"
+                :indeterminate="isProcessing && progressPercentage === 0"
+              >
+                <template #default="{ percentage }">
+                  <span class="progress-text">{{ Math.round(percentage) }}%</span>
+                </template>
+              </el-progress>
+
+              <div class="progress-info">
+                <div class="progress-message">
+                  <el-icon class="is-loading" v-if="isProcessing">
+                    <Loading />
+                  </el-icon>
+                  {{ progress.message }}
+                </div>
+                <div class="progress-tips">
+                  <el-text size="small" type="info">
+                    正在处理，请稍候...整个过程可能需要10-30秒
+                  </el-text>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </el-tab-pane>
+        <el-tab-pane label="日志" name="logs">
+          <div class="log-container" ref="logContainer">
+            <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
+              <span class="log-time">{{ log.time }}</span>
+              <span class="log-message">{{ log.message }}</span>
+            </div>
+            <div v-if="logs.length === 0" class="log-empty">暂无日志</div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
 
       <template #footer>
         <el-button @click="showProgressDialog = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="showLogDrawer"
+      title="处理日志"
+      direction="rtl"
+      size="80%"
+    >
+      <div class="action-bar" style="margin-bottom: 8px; justify-content: flex-end;">
+        <el-button type="warning" @click="clearLogs">清空日志</el-button>
+      </div>
+      <div class="log-container" ref="logContainer">
+        <div v-for="(log, index) in logs" :key="index" :class="['log-item', `log-${log.type}`]">
+          <span class="log-time">{{ log.time }}</span>
+          <span class="log-message">{{ log.message }}</span>
+        </div>
+        <div v-if="logs.length === 0" class="log-empty">暂无日志</div>
+      </div>
+    </el-drawer>
 
     <!-- 处理结果对话框 -->
     <el-dialog
@@ -687,7 +710,7 @@ const getStepIcon = (stepIndex: number) => {
 .main-content {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 16px;
   min-height: 0;
 }
