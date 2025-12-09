@@ -186,6 +186,9 @@ func (a *App) OnStartup(ctx context.Context) {
 
 	// 初始化CLI版本的应用
 	a.application = app.NewApplication()
+
+	// 启动 token 刷新服务
+	go a.startTokenRefresher()
 }
 
 // OnDomReady DOM准备就绪
@@ -209,6 +212,37 @@ func (a *App) OnBeforeClose(ctx context.Context) (prevent bool) {
 // OnShutdown 关闭
 func (a *App) OnShutdown(ctx context.Context) {
 	systray.Quit()
+}
+
+// startTokenRefresher 启动 token 刷新服务
+func (a *App) startTokenRefresher() {
+	// 等待服务容器初始化完成
+	for {
+		if a.serviceContainer != nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 获取 token 刷新服务
+	tokenRefresher := a.serviceContainer.GetTokenRefresherService()
+	if tokenRefresher != nil {
+		// 设置事件监听
+		tokenRefresher.SetReauthCallback(func(err error) {
+			// 发射事件到前端，显示重新认证提示
+			wailsRuntime.EventsEmit(a.ctx, "reauthRequired", map[string]interface{}{
+				"message": "Token 已过期，需要重新认证",
+				"error":   err.Error(),
+			})
+		})
+
+		// 启动服务
+		if err := tokenRefresher.Start(); err != nil {
+			a.sendClipboardLog("error", fmt.Sprintf("启动 token 刷新服务失败: %v", err))
+		} else {
+			a.sendClipboardLog("info", "Token 刷新服务已启动")
+		}
+	}
 }
 
 // InitializeServiceContainer 初始化服务容器
@@ -583,6 +617,17 @@ func (a *App) Quit() {
 	a.quitOnce.Do(func() {
 		a.isQuitting = true
 		a.quitWG.Add(1)
+
+		// 停止 token 刷新服务
+		if a.serviceContainer != nil {
+			if tokenRefresher := a.serviceContainer.GetTokenRefresherService(); tokenRefresher != nil {
+				if err := tokenRefresher.Stop(); err != nil {
+					a.sendClipboardLog("error", fmt.Sprintf("停止 token 刷新服务失败: %v", err))
+				} else {
+					a.sendClipboardLog("info", "Token 刷新服务已停止")
+				}
+			}
+		}
 
 		// 先停止托盘
 		systray.Quit()

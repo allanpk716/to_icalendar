@@ -61,6 +61,20 @@ type LoggingConfig struct {
 	LogDir        string `yaml:"log_dir"`         // 日志目录（可选，默认 ./Logs/）
 }
 
+// TokenManagerConfig represents the configuration for token management and auto-refresh settings.
+type TokenManagerConfig struct {
+	// 提前多少小时开始刷新 token
+	RefreshBeforeExpiry int `yaml:"refresh_before_expiry" default:"24"`
+	// 检查间隔，单位小时
+	CheckInterval int `yaml:"check_interval" default:"6"`
+	// 最大重试次数
+	MaxRetries int `yaml:"max_retries" default:"3"`
+	// 重试间隔，单位分钟
+	RetryInterval int `yaml:"retry_interval" default:"30"`
+	// 是否启用主动刷新
+	Enabled bool `yaml:"enabled" default:"true"`
+}
+
 // Validate validates the reminder configuration
 func (c *ReminderConfig) Validate() error {
 	// 如果没有设置默认提醒时间，使用默认值
@@ -123,8 +137,8 @@ func (c *ReminderConfig) GetSmartRemindTime(priority Priority) string {
 	}
 }
 
-// ServerConfig contains configuration for Microsoft Todo, Dify integration, reminder settings, cache management, and logging.
-// It includes Azure AD credentials, timezone settings, Dify API configuration, reminder defaults, cache configuration, and logging configuration.
+// ServerConfig contains configuration for Microsoft Todo, Dify integration, reminder settings, cache management, logging, and token management.
+// It includes Azure AD credentials, timezone settings, Dify API configuration, reminder defaults, cache configuration, logging configuration, and token management configuration.
 type ServerConfig struct {
 	MicrosoftTodo  MicrosoftTodoConfig   `yaml:"microsoft_todo"`
 	Reminder       ReminderConfig        `yaml:"reminder"`
@@ -132,6 +146,7 @@ type ServerConfig struct {
 	Dify           DifyConfig           `yaml:"dify"`
 	Cache          CacheConfig          `yaml:"cache"`
 	Logging        LoggingConfig        `yaml:"logging"`
+	TokenManager   *TokenManagerConfig  `yaml:"token_manager,omitempty"`
 }
 
 // ParsedReminder represents a reminder with parsed time information.

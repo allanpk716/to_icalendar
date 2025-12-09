@@ -1274,3 +1274,41 @@ func parseTime(timeStr string) time.Time {
 
 	return time.Time{}
 }
+
+// GetTokenStatus 获取当前 token 状态
+func (c *SimpleTodoClient) GetTokenStatus() (*TokenStatus, error) {
+	token, err := c.loadCachedToken()
+	if err != nil {
+		return &TokenStatus{
+			HasToken:      false,
+			IsExpired:     true,
+			NeedsRefresh:  false,
+			NeedsReauth:   true,
+			ExpiresAt:     time.Time{},
+			TimeToExpiry:  0,
+		}, nil
+	}
+
+	if token == nil {
+		return &TokenStatus{
+			HasToken:      false,
+			IsExpired:     true,
+			NeedsRefresh:  false,
+			NeedsReauth:   true,
+			ExpiresAt:     time.Time{},
+			TimeToExpiry:  0,
+		}, nil
+	}
+
+	now := time.Now()
+	timeToExpiry := token.ExpiresAt.Sub(now)
+
+	return &TokenStatus{
+		HasToken:      true,
+		IsExpired:     token.isExpired(),
+		NeedsRefresh:  timeToExpiry < 24*time.Hour, // 24小时内需要刷新
+		NeedsReauth:   token.RefreshToken == "",
+		ExpiresAt:     token.ExpiresAt,
+		TimeToExpiry:  timeToExpiry,
+	}, nil
+}

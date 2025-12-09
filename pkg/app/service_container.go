@@ -2,22 +2,24 @@ package app
 
 import (
 	"github.com/allanpk716/to_icalendar/pkg/cache"
+	"github.com/allanpk716/to_icalendar/pkg/logger"
 	"github.com/allanpk716/to_icalendar/pkg/models"
 	"github.com/allanpk716/to_icalendar/pkg/services"
 )
 
 // ServiceContainer 服务容器实现
 type ServiceContainer struct {
-	configDir       string
-	config          *models.ServerConfig
-	cacheManager    *cache.UnifiedCacheManager
-	logger          interface{}
-	configService   services.ConfigService
-	cacheService    services.CacheService
-	cleanupService  services.CleanupService
-	clipboardService services.ClipboardService
-	todoService     services.TodoService
-	difyService     services.DifyService
+	configDir            string
+	config               *models.ServerConfig
+	cacheManager         *cache.UnifiedCacheManager
+	logger               interface{}
+	configService        services.ConfigService
+	cacheService         services.CacheService
+	cleanupService       services.CleanupService
+	clipboardService     services.ClipboardService
+	todoService          services.TodoService
+	difyService          services.DifyService
+	tokenRefresherService services.TokenRefresherService
 }
 
 // NewServiceContainer 创建服务容器
@@ -54,6 +56,9 @@ func (sc *ServiceContainer) initializeServices() {
 
 	// 初始化 Dify 服务（延迟初始化）
 	sc.difyService = nil
+
+	// 初始化 Token 刷新服务（延迟初始化）
+	sc.tokenRefresherService = nil
 }
 
 // GetConfigService 获取配置服务
@@ -90,6 +95,23 @@ func (sc *ServiceContainer) GetDifyService() services.DifyService {
 		sc.difyService = NewDifyService(sc.config, sc.logger)
 	}
 	return sc.difyService
+}
+
+// GetTokenRefresherService 获取 Token 刷新服务
+func (sc *ServiceContainer) GetTokenRefresherService() services.TokenRefresherService {
+	if sc.tokenRefresherService == nil {
+		// 获取 logger 实例
+		var loggerInstance logger.Logger
+		// 检查 sc.logger 是否已经是 Logger 接口类型
+		if l, ok := sc.logger.(logger.Logger); ok {
+			loggerInstance = l
+		} else {
+			// 获取默认 logger (Manager 类型，实现了 Logger 接口)
+			loggerInstance = logger.GetLogger()
+		}
+		sc.tokenRefresherService = services.NewTokenRefresherService(sc.config, loggerInstance)
+	}
+	return sc.tokenRefresherService
 }
 
 // GetLogger 获取日志器
