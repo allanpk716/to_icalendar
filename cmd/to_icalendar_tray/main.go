@@ -16,7 +16,7 @@ var appIcon []byte
 
 func main() {
 	// Create an instance of the app structure
-	app := NewApp(appIcon)
+	app := NewApp()
 
 	// Create application with options - no main menu since we use systray
 	err := wails.Run(&options.App{
@@ -27,10 +27,10 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
-		OnDomReady:       app.onDomReady,
-		OnBeforeClose:    app.onBeforeClose,
-		OnShutdown:       app.onShutdown,
+		OnStartup:        app.OnStartup,
+		OnDomReady:       app.OnDomReady,
+		OnBeforeClose:    app.OnBeforeClose,
+		OnShutdown:       app.OnShutdown,
 		WindowStartState: options.Normal, // 改为Normal启动，确保窗口可见
 		// 移除Menu配置，使用systray处理托盘功能
 		Bind: []interface{}{

@@ -3,8 +3,8 @@ package wails
 import (
 	"context"
 
-	"github.com/allanpk716/to_icalendar/internal/app"
-	"github.com/allanpk716/to_icalendar/internal/logger"
+	"github.com/allanpk716/to_icalendar/pkg/app"
+	"github.com/allanpk716/to_icalendar/pkg/logger"
 	"github.com/allanpk716/to_icalendar/pkg/commands"
 )
 

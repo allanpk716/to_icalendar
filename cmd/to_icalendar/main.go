@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/allanpk716/to_icalendar/internal/app"
-	"github.com/allanpk716/to_icalendar/internal/commands"
-	"github.com/allanpk716/to_icalendar/internal/logger"
-	svcs "github.com/allanpk716/to_icalendar/internal/services"
+	"github.com/allanpk716/to_icalendar/pkg/app"
+	"github.com/allanpk716/to_icalendar/pkg/commands"
+	"github.com/allanpk716/to_icalendar/pkg/logger"
+	svcs "github.com/allanpk716/to_icalendar/pkg/services"
 )
 
 const (

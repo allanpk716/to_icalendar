@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/allanpk716/to_icalendar/pkg/microsofttodo"
 	"github.com/allanpk716/to_icalendar/pkg/models"
+	svcs "github.com/allanpk716/to_icalendar/pkg/services"
 )
 
 // TodoTester Microsoft Todo 连接测试器
@@ -127,24 +127,14 @@ func (t *TodoTester) TestConnection() *TestItemResult {
 		t.log("warn", "未配置用户邮箱，将使用应用程序权限模式")
 	}
 
-	// 创建客户端
-	t.log("info", "创建 Microsoft Todo 客户端...")
-	todoClient, err := microsofttodo.NewSimpleTodoClient(
-		t.config.MicrosoftTodo.TenantID,
-		t.config.MicrosoftTodo.ClientID,
-		t.config.MicrosoftTodo.ClientSecret,
-		t.config.MicrosoftTodo.UserEmail,
-	)
-	if err != nil {
-		result.Message = fmt.Sprintf("创建客户端失败: %v", err)
-		result.Duration = time.Since(startTime)
-		result.ErrorType = "client_creation_error"
-		return result
-	}
+	// 创建 Todo 服务
+	t.log("info", "创建 Microsoft Todo 服务...")
+	logger := &MockLogger{} // 创建一个简单的日志器
+	todoService := svcs.NewTodoService(t.config, logger)
 
 	// 测试连接
 	t.log("info", "连接到 Microsoft Graph API...")
-	err = todoClient.TestConnection()
+	err = todoService.TestConnection()
 	if err != nil {
 		result.Message = fmt.Sprintf("API 连接失败: %v", err)
 		result.Duration = time.Since(startTime)
@@ -154,7 +144,7 @@ func (t *TodoTester) TestConnection() *TestItemResult {
 
 	// 获取服务信息
 	t.log("info", "获取服务信息...")
-	serverInfo, err := t.getServerInfo(todoClient)
+	serverInfo, err := t.getServerInfo(todoService)
 	if err != nil {
 		result.Message = fmt.Sprintf("获取服务信息失败: %v", err)
 		result.Duration = time.Since(startTime)
@@ -183,7 +173,7 @@ func (t *TodoTester) TestAll() *TestResult {
 }
 
 // getServerInfo 获取服务器信息
-func (t *TodoTester) getServerInfo(client *microsofttodo.SimpleTodoClient) (string, error) {
+func (t *TodoTester) getServerInfo(todoService svcs.TodoService) (string, error) {
 	// TestConnection 已经成功，说明连接正常
 	// 由于没有公开的方法获取用户信息，我们返回基本信息
 	serverInfo := "Microsoft Graph API 连接成功"
@@ -196,6 +186,20 @@ func (t *TodoTester) getServerInfo(client *microsofttodo.SimpleTodoClient) (stri
 
 	return serverInfo, nil
 }
+
+// MockLogger 简单的日志器实现
+type MockLogger struct{}
+
+func (m *MockLogger) Debug(args ...interface{})                 { fmt.Print(args...) }
+func (m *MockLogger) Debugf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
+func (m *MockLogger) Info(args ...interface{})                  { fmt.Print(args...) }
+func (m *MockLogger) Infof(format string, args ...interface{})  { fmt.Printf(format+"\n", args...) }
+func (m *MockLogger) Warn(args ...interface{})                  { fmt.Print(args...) }
+func (m *MockLogger) Warnf(format string, args ...interface{})  { fmt.Printf(format+"\n", args...) }
+func (m *MockLogger) Error(args ...interface{})                 { fmt.Print(args...) }
+func (m *MockLogger) Errorf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
+func (m *MockLogger) Fatal(args ...interface{})                 { fmt.Print(args...) }
+func (m *MockLogger) Fatalf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
 
 // min 返回两个整数中的较小值
 func min(a, b int) int {
