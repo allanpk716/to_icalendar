@@ -197,6 +197,27 @@ func (ts *TodoServiceImpl) GetServerInfo() (map[string]interface{}, error) {
 	return todoClient.GetServerInfo()
 }
 
+// GetClient 获取 Microsoft Todo 客户端实例
+func (ts *TodoServiceImpl) GetClient() *microsofttodo.SimpleTodoClient {
+	if ts.config == nil {
+		return nil
+	}
+
+	// 创建并返回客户端实例
+	todoClient, err := microsofttodo.NewSimpleTodoClient(
+		ts.config.MicrosoftTodo.TenantID,
+		ts.config.MicrosoftTodo.ClientID,
+		ts.config.MicrosoftTodo.ClientSecret,
+		ts.config.MicrosoftTodo.UserEmail,
+	)
+	if err != nil {
+		logger.Errorf("创建 Microsoft Todo 客户端失败: %v", err)
+		return nil
+	}
+
+	return todoClient
+}
+
 // 注意：parseReminderDateTime 和 parseReminderBeforeTime 函数已被移除
 // 现在使用 models.ParseReminderTimeWithConfig 进行完整的时间解析
 // 这提供了更好的时区处理、智能提醒功能和错误处理

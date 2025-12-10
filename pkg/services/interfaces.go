@@ -5,6 +5,7 @@ import (
 
 	"github.com/allanpk716/to_icalendar/pkg/models"
 	"github.com/allanpk716/to_icalendar/pkg/cache"
+	"github.com/allanpk716/to_icalendar/pkg/microsofttodo"
 )
 
 // ConfigService 配置服务接口
@@ -44,6 +45,7 @@ type TodoService interface {
 	CreateTask(ctx context.Context, reminder *models.Reminder) error
 	TestConnection() error
 	GetServerInfo() (map[string]interface{}, error)
+	GetClient() *microsofttodo.SimpleTodoClient
 }
 
 // DifyService Dify AI 服务接口

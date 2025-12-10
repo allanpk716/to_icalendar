@@ -40,6 +40,7 @@ declare module 'vue' {
     IconSupport: typeof import('./src/components/icons/IconSupport.vue')['default']
     IconTooling: typeof import('./src/components/icons/IconTooling.vue')['default']
     LogDrawer: typeof import('./src/components/LogDrawer.vue')['default']
+    OAuthWebViewDialog: typeof import('./src/components/OAuthWebViewDialog.vue')['default']
     ProgressDialog: typeof import('./src/components/ProgressDialog.vue')['default']
     ResultDialog: typeof import('./src/components/ResultDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']

@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 	"crypto/rand"
@@ -19,7 +21,9 @@ import (
 	"github.com/allanpk716/to_icalendar/pkg/config"
 	"github.com/allanpk716/to_icalendar/pkg/logger"
 	"github.com/allanpk716/to_icalendar/pkg/models"
+	"github.com/allanpk716/to_icalendar/pkg/testing"
 	"github.com/getlantern/systray"
+	"gopkg.in/yaml.v3"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -39,6 +43,16 @@ type LogMessage struct {
 	Type    string `json:"type"`    // info, debug, error, success, warn
 	Message string `json:"message"`
 	Time    string `json:"time"`
+}
+
+// TestResult 完整测试结果结构
+type TestResult struct {
+	ConfigTest     testing.TestItemResult  `json:"configTest"`
+	TodoTest       testing.TestItemResult  `json:"todoTest"`
+	DifyTest       *testing.TestItemResult `json:"difyTest,omitempty"`
+	OverallSuccess bool                   `json:"overallSuccess"`
+	Duration       time.Duration          `json:"duration"`
+	Timestamp      string                 `json:"timestamp"`
 }
 
 // TaskStatus 任务状态
@@ -184,8 +198,37 @@ func (a *App) OnStartup(ctx context.Context) {
 	a.taskManager = NewTaskManager(ctx)
 	a.isWindowVisible = true  // 启动时窗口可见
 
+	// 初始化服务容器
+	if err := a.InitializeServiceContainer(); err != nil {
+		logger.Errorf("初始化服务容器失败: %v", err)
+		// 即使服务容器初始化失败，也继续启动应用，但某些功能可能不可用
+	}
+
 	// 初始化CLI版本的应用
 	a.application = app.NewApplication()
+
+	// 监听前端WebView导航事件
+	wailsRuntime.EventsOn(ctx, "oauthNavigation", func(data ...interface{}) {
+		if len(data) > 0 {
+			if callbackURL, ok := data[0].(string); ok {
+				// 检查是否是OAuth回调URL
+				if strings.Contains(callbackURL, "/oauth2/callback") {
+					// 解析state
+					u, _ := url.Parse(callbackURL)
+					state := u.Query().Get("state")
+					if state != "" {
+						// 处理回调
+						result, err := a.HandleOAuthCallback(state, callbackURL)
+						if err != nil {
+							wailsRuntime.EventsEmit(ctx, "oauthError", err.Error())
+						} else {
+							wailsRuntime.EventsEmit(ctx, "oauthResult", result)
+						}
+					}
+				}
+			}
+		}
+	})
 
 	// 启动 token 刷新服务
 	go a.startTokenRefresher()
@@ -649,4 +692,406 @@ func (a *App) Quit() {
 			wailsRuntime.Quit(a.ctx)
 		}()
 	})
+}
+
+// StartBrowserOAuth 启动浏览器OAuth认证
+func (a *App) StartBrowserOAuth() (map[string]interface{}, error) {
+	if a.serviceContainer == nil {
+		return nil, fmt.Errorf("服务未初始化")
+	}
+
+	// 获取Todo服务
+	todoService := a.serviceContainer.GetTodoService()
+	if todoService == nil {
+		return nil, fmt.Errorf("Todo服务未初始化")
+	}
+
+	// 获取SimpleTodoClient
+	client := todoService.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("无法获取Todo客户端")
+	}
+
+	// 在后台goroutine中执行认证，避免阻塞前端
+	go func() {
+		logger.Info("开始后台浏览器OAuth认证流程")
+
+		result, err := client.AuthenticateWithBrowser(context.Background())
+		if err != nil {
+			logger.Errorf("浏览器OAuth认证失败: %v", err)
+			// 发射错误事件
+			if a.ctx != nil {
+				wailsRuntime.EventsEmit(a.ctx, "oauthError", map[string]interface{}{
+					"error": err.Error(),
+					"type":  "browser_auth_failed",
+				})
+			}
+		} else {
+			logger.Info("浏览器OAuth认证成功")
+			// 发射成功事件
+			if a.ctx != nil {
+				wailsRuntime.EventsEmit(a.ctx, "oauthResult", map[string]interface{}{
+					"success":      result.Success,
+					"access_token": result.AccessToken,
+					"expires_in":   result.ExpiresIn,
+					"type":         "browser_auth_success",
+				})
+			}
+		}
+	}()
+
+	return map[string]interface{}{
+		"message": "正在启动浏览器进行OAuth认证，请在浏览器中完成登录",
+		"type":    "browser_auth_started",
+	}, nil
+}
+
+// HandleOAuthCallback 处理OAuth回调
+func (a *App) HandleOAuthCallback(state, callbackURL string) (map[string]interface{}, error) {
+	// 由于OAuth回调处理的复杂性，这里暂时返回一个占位符实现
+	// 实际的OAuth处理应该通过 AuthenticateWithBrowser 方法完成
+	return map[string]interface{}{
+		"success": false,
+		"error":   "OAuth callback handling not implemented. Please use AuthenticateWithBrowser instead.",
+		"type":    "oauth_callback_not_implemented",
+	}, nil
+}
+
+
+// InitConfig 初始化配置
+func (a *App) InitConfig() string {
+	// 获取用户目录和配置路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		result := InitResult{
+			Success:      false,
+			Message:      fmt.Sprintf("获取用户目录失败: %v", err),
+			ConfigDir:    "",
+			ServerConfig: "",
+		}
+		return fmt.Sprintf(`{"success":false,"message":"%s","configDir":"","serverConfig":""}`, result.Message)
+	}
+
+	configDir := filepath.Join(homeDir, ".to_icalendar")
+	serverConfigPath := filepath.Join(configDir, "server.yaml")
+
+	// 创建配置目录
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		result := InitResult{
+			Success:      false,
+			Message:      fmt.Sprintf("创建配置目录失败: %v", err),
+			ConfigDir:    configDir,
+			ServerConfig: serverConfigPath,
+		}
+		return fmt.Sprintf(`{"success":false,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+	}
+
+	// 检查文件是否已存在
+	if _, err := os.Stat(serverConfigPath); err == nil {
+		result := InitResult{
+			Success:      true,
+			Message:      "配置文件已存在，无需重复初始化",
+			ConfigDir:    configDir,
+			ServerConfig: serverConfigPath,
+		}
+		return fmt.Sprintf(`{"success":true,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+	}
+
+	// 创建配置文件内容（复用现有的完整模板）
+	serverConfigContent := `# Microsoft Todo 配置
+microsoft_todo:
+  tenant_id: "YOUR_TENANT_ID"
+  client_id: "YOUR_CLIENT_ID"
+  client_secret: "YOUR_CLIENT_SECRET"
+  user_email: ""
+  timezone: "Asia/Shanghai"
+
+# 提醒配置
+reminder:
+  default_remind_before: "15m"
+  enable_smart_reminder: true
+
+# 去重配置
+deduplication:
+  enabled: true
+  time_window_minutes: 5
+  similarity_threshold: 80
+  check_incomplete_only: true
+  enable_local_cache: true
+  enable_remote_query: true
+
+# Dify AI 配置（可选）
+dify:
+  api_endpoint: ""
+  api_key: ""
+  timeout: 60
+
+# 缓存配置
+cache:
+  auto_cleanup_days: 30
+  cleanup_on_startup: true
+  preserve_successful_hashes: true
+
+# 日志配置
+logging:
+  level: "info"
+  console_output: true
+  file_output: true
+  log_dir: "./Logs"`
+
+	// 写入文件
+	if err := os.WriteFile(serverConfigPath, []byte(serverConfigContent), 0600); err != nil {
+		result := InitResult{
+			Success:      false,
+			Message:      fmt.Sprintf("创建配置文件失败: %v", err),
+			ConfigDir:    configDir,
+			ServerConfig: serverConfigPath,
+		}
+		return fmt.Sprintf(`{"success":false,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+	}
+
+	// 返回成功结果
+	result := InitResult{
+		Success:      true,
+		Message:      "初始化成功",
+		ConfigDir:    configDir,
+		ServerConfig: serverConfigPath,
+	}
+	return fmt.Sprintf(`{"success":true,"message":"%s","configDir":"%s","serverConfig":"%s"}`, result.Message, result.ConfigDir, result.ServerConfig)
+}
+
+// TestConfiguration 测试配置完整性和服务连通性
+func (a *App) TestConfiguration() string {
+	startTime := time.Now()
+
+	// 执行三个测试
+	configTest := a.testConfigurationFile()
+	todoTest := a.testMicrosoftTodoService()
+	difyTest := a.testDifyService()
+
+	// 构建最终结果
+	result := &TestResult{
+		ConfigTest:     *configTest,
+		TodoTest:       *todoTest,
+		DifyTest:       difyTest,
+		OverallSuccess: configTest.Success && todoTest.Success && (difyTest == nil || difyTest.Success),
+		Duration:       time.Since(startTime),
+		Timestamp:      time.Now().Format(time.RFC3339),
+	}
+
+	// 返回 JSON 字符串
+	jsonData, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Sprintf(`{"success":false,"error":"序列化测试结果失败: %v"}`, err)
+	}
+	return string(jsonData)
+}
+
+// testConfigurationFile 测试配置文件的有效性
+func (a *App) testConfigurationFile() *testing.TestItemResult {
+	startTime := time.Now()
+	result := &testing.TestItemResult{
+		Name:     "配置文件验证",
+		Success:  false,
+		Duration: 0,
+	}
+
+	// 获取用户目录和配置文件路径
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		result.Error = "无法获取用户主目录"
+		result.Details = map[string]interface{}{
+			"error": "系统错误: " + err.Error(),
+		}
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 检查配置文件是否存在
+	if _, err := os.Stat(serverConfigPath); os.IsNotExist(err) {
+		result.Error = "配置文件不存在"
+		result.Details = map[string]interface{}{
+			"config_path": serverConfigPath,
+			"message":     "请先运行初始化配置",
+		}
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 读取并解析配置文件
+	configData, err := os.ReadFile(serverConfigPath)
+	if err != nil {
+		result.Error = "配置文件读取失败"
+		result.Details = map[string]interface{}{
+			"error":        err.Error(),
+			"config_path":  serverConfigPath,
+		}
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	var config models.ServerConfig
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		result.Error = "配置文件格式错误"
+		result.Details = map[string]interface{}{
+			"error":   "YAML解析错误: " + err.Error(),
+			"message": "请检查配置文件格式是否正确",
+		}
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 验证必需字段
+	missingFields := []string{}
+	if config.MicrosoftTodo.TenantID == "" {
+		missingFields = append(missingFields, "tenant_id (租户ID)")
+	}
+	if config.MicrosoftTodo.ClientID == "" {
+		missingFields = append(missingFields, "client_id (客户端ID)")
+	}
+	if config.MicrosoftTodo.ClientSecret == "" {
+		missingFields = append(missingFields, "client_secret (客户端密钥)")
+	}
+
+	if len(missingFields) > 0 {
+		result.Error = "Microsoft Todo 配置缺少必需字段: " + strings.Join(missingFields, ", ")
+		result.Details = map[string]interface{}{
+			"missing_fields": missingFields,
+			"config_path":    serverConfigPath,
+			"message":        "请在配置文件中填写以上必需字段",
+		}
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// 检查占位符
+	placeholderFields := []string{}
+	if config.MicrosoftTodo.TenantID == "YOUR_TENANT_ID" {
+		placeholderFields = append(placeholderFields, "tenant_id")
+	}
+	if config.MicrosoftTodo.ClientID == "YOUR_CLIENT_ID" {
+		placeholderFields = append(placeholderFields, "client_id")
+	}
+	if config.MicrosoftTodo.ClientSecret == "YOUR_CLIENT_SECRET" {
+		placeholderFields = append(placeholderFields, "client_secret")
+	}
+
+	if len(placeholderFields) > 0 {
+		result.Error = "Microsoft Todo 配置包含占位符，需要更新为实际值"
+		result.Details = map[string]interface{}{
+			"placeholder_fields": placeholderFields,
+			"message":            "请访问 Azure Portal (portal.azure.com) 创建应用注册并获取实际值",
+		}
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	result.Success = true
+	result.Message = "配置文件验证通过"
+	result.Duration = time.Since(startTime)
+	return result
+}
+
+// testMicrosoftTodoService 测试 Microsoft Todo 服务（使用新的测试器）
+func (a *App) testMicrosoftTodoService() *testing.TestItemResult {
+	// 获取配置目录和文件
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return &testing.TestItemResult{
+			Name:     "Microsoft Todo 服务测试",
+			Success:  false,
+			Error:    "无法获取用户主目录: " + err.Error(),
+			Duration: 0,
+		}
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 创建 TodoTester
+	tester, err := testing.NewTodoTester(serverConfigPath)
+	if err != nil {
+		return &testing.TestItemResult{
+			Name:     "Microsoft Todo 服务测试",
+			Success:  false,
+			Error:    "创建测试器失败: " + err.Error(),
+			Duration: 0,
+		}
+	}
+
+	// 设置日志回调
+	tester.SetLogCallback(func(level, message string) {
+		a.sendTestLog(level, message)
+	})
+
+	// 执行连接测试
+	result := tester.TestConnection()
+	return result
+}
+
+// testDifyService 测试 Dify 服务（使用共享测试器）
+func (a *App) testDifyService() *testing.TestItemResult {
+	// 获取配置目录和文件
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return &testing.TestItemResult{
+			Name:     "Dify 服务测试",
+			Success:  false,
+			Error:    "无法获取用户主目录: " + err.Error(),
+			Duration: 0,
+		}
+	}
+
+	serverConfigPath := filepath.Join(homeDir, ".to_icalendar", "server.yaml")
+
+	// 加载配置文件
+	configData, err := os.ReadFile(serverConfigPath)
+	if err != nil {
+		return &testing.TestItemResult{
+			Name:     "Dify 服务测试",
+			Success:  false,
+			Error:    "配置文件读取失败: " + err.Error(),
+			Details: map[string]interface{}{
+				"config_path": serverConfigPath,
+			},
+			Duration: 0,
+		}
+	}
+
+	var config models.ServerConfig
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		return &testing.TestItemResult{
+			Name:     "Dify 服务测试",
+			Success:  false,
+			Error:    "配置文件解析错误: " + err.Error(),
+			Details: map[string]interface{}{
+				"message": "YAML解析错误，请检查配置文件格式",
+			},
+			Duration: 0,
+		}
+	}
+
+	// 转换 models.DifyConfig 到 testing.DifyConfig
+	testingDifyConfig := &testing.DifyConfig{
+		APIEndpoint: config.Dify.APIEndpoint,
+		APIKey:      config.Dify.APIKey,
+		Timeout:     config.Dify.Timeout,
+	}
+
+	// 使用共享测试器进行测试
+	difyTester := testing.NewDifyTester()
+	return difyTester.TestDifyService(testingDifyConfig)
+}
+
+// sendTestLog 发送测试日志到前端
+func (a *App) sendTestLog(level, message string) {
+	logMsg := &LogMessage{
+		Type:    level,
+		Message: message,
+		Time:    time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	// 发送事件到前端
+	wailsRuntime.EventsEmit(a.ctx, "testLog", logMsg)
 }

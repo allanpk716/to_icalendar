@@ -14,8 +14,10 @@ import {
 } from '@element-plus/icons-vue'
 import { useTest } from '@/composables/useTest'
 import { useResponsiveDialog } from '@/composables/useResponsiveDialog'
+import { WailsAPI } from '@/api/wails'
 import type { TestItemResult } from '@/types/api'
 import TestItemDetail from '@/components/TestItemDetail.vue'
+import OAuthWebViewDialog from '@/components/OAuthWebViewDialog.vue'
 
 // 使用测试状态管理
 const {
@@ -44,6 +46,10 @@ const showResultDialog = ref(false)
 const showErrorDetailDialog = ref(false)
 const selectedError = ref<any>(null)
 const activeCollapse = ref<string[]>(['config', 'todo', 'dify'])
+
+// OAuth WebView授权对话框
+const showWebViewAuth = ref(false)
+const isAuthenticating = ref(false)
 
 // 计算属性
 const canStartTest = computed(() => !isRunning.value)
@@ -78,11 +84,27 @@ const handleStartTest = async () => {
       showResultDialog.value = true
       ElMessage.success('测试完成！')
     } else {
+      // 检查是否需要重新授权
+      if (result.error && result.error.includes('需要重新认证')) {
+        await ElMessageBox.confirm(
+          'Microsoft Todo 授权已过期，需要重新授权。是否立即进行授权？',
+          '需要重新授权',
+          {
+            confirmButtonText: '立即授权',
+            cancelButtonText: '稍后再说',
+            type: 'warning'
+          }
+        )
+        await handleAuthentication()
+        return
+      }
       throw new Error(result.error || '测试失败')
     }
   } catch (err: any) {
     const error = err as Error
-    ElMessage.error(`测试失败: ${error.message}`)
+    if (error.message !== 'cancel') {
+      ElMessage.error(`测试失败: ${error.message}`)
+    }
   }
 }
 
@@ -119,6 +141,26 @@ const showDetailedError = async (item: TestItemResult) => {
       type: 'error'
     }
   )
+}
+
+// 处理认证
+const handleAuthentication = async () => {
+  showWebViewAuth.value = true
+  isAuthenticating.value = true
+}
+
+// 授权成功回调
+const onAuthSuccess = () => {
+  ElMessage.success('授权成功，重新测试连接')
+  isAuthenticating.value = false
+  // 重新执行测试
+  handleStartTest()
+}
+
+// 授权失败回调
+const onAuthError = (error: string) => {
+  ElMessage.error(`授权失败: ${error}`)
+  isAuthenticating.value = false
 }
 </script>
 
@@ -196,6 +238,17 @@ const showDetailedError = async (item: TestItemResult) => {
               >
                 <el-icon><Refresh /></el-icon>
                 重置
+              </el-button>
+
+              <el-button
+                type="warning"
+                size="large"
+                :disabled="isRunning || isAuthenticating"
+                :loading="isAuthenticating"
+                @click="handleAuthentication"
+              >
+                <el-icon><Setting /></el-icon>
+                {{ isAuthenticating ? '授权中...' : 'Microsoft授权' }}
               </el-button>
             </div>
           </div>
@@ -334,6 +387,13 @@ const showDetailedError = async (item: TestItemResult) => {
         <el-button @click="showErrorDetailDialog = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- OAuth WebView授权对话框 -->
+    <OAuthWebViewDialog
+      v-model="showWebViewAuth"
+      @success="onAuthSuccess"
+      @error="onAuthError"
+    />
   </div>
 </template>
 

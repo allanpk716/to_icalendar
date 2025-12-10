@@ -187,4 +187,23 @@ export class WailsAPI {
       }
     }
   }
+
+  // 启动浏览器OAuth认证
+  static async StartBrowserOAuth(): Promise<WailsResponse<{
+    message: string
+    type: string
+  }>> {
+    try {
+      const result = await (window as any).go.main.App.StartBrowserOAuth()
+      return {
+        success: true,
+        data: result
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `启动浏览器认证失败: ${error}`
+      }
+    }
+  }
 }
