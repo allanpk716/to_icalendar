@@ -423,7 +423,7 @@ func (c *SimpleTodoClient) buildAuthURL() string {
 	params.Add("client_id", c.authConfig.ClientID)
 	params.Add("response_type", "code")
 	params.Add("redirect_uri", "http://localhost:8080/callback")
-	params.Add("scope", "Tasks.ReadWrite User.Read offline_access")
+	params.Add("scope", "https://graph.microsoft.com/Tasks.ReadWrite https://graph.microsoft.com/User.Read offline_access")
 	params.Add("state", "12345") // 简单的state值
 
 	return fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/authorize?%s",

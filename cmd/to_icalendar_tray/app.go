@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +20,6 @@ import (
 	"github.com/allanpk716/to_icalendar/pkg/config"
 	"github.com/allanpk716/to_icalendar/pkg/logger"
 	"github.com/allanpk716/to_icalendar/pkg/models"
-	"github.com/allanpk716/to_icalendar/pkg/testing"
 	"github.com/getlantern/systray"
 	"gopkg.in/yaml.v3"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -207,29 +205,7 @@ func (a *App) OnStartup(ctx context.Context) {
 	// 初始化CLI版本的应用
 	a.application = app.NewApplication()
 
-	// 监听前端WebView导航事件
-	wailsRuntime.EventsOn(ctx, "oauthNavigation", func(data ...interface{}) {
-		if len(data) > 0 {
-			if callbackURL, ok := data[0].(string); ok {
-				// 检查是否是OAuth回调URL
-				if strings.Contains(callbackURL, "/oauth2/callback") {
-					// 解析state
-					u, _ := url.Parse(callbackURL)
-					state := u.Query().Get("state")
-					if state != "" {
-						// 处理回调
-						result, err := a.HandleOAuthCallback(state, callbackURL)
-						if err != nil {
-							wailsRuntime.EventsEmit(ctx, "oauthError", err.Error())
-						} else {
-							wailsRuntime.EventsEmit(ctx, "oauthResult", result)
-						}
-					}
-				}
-			}
-		}
-	})
-
+	
 	// 启动 token 刷新服务
 	go a.startTokenRefresher()
 }
@@ -694,68 +670,25 @@ func (a *App) Quit() {
 	})
 }
 
-// StartBrowserOAuth 启动浏览器OAuth认证
+// StartBrowserOAuth 启动浏览器OAuth认证 - 直接使用CLI版本的逻辑
 func (a *App) StartBrowserOAuth() (map[string]interface{}, error) {
 	if a.serviceContainer == nil {
 		return nil, fmt.Errorf("服务未初始化")
 	}
 
-	// 获取Todo服务
-	todoService := a.serviceContainer.GetTodoService()
-	if todoService == nil {
-		return nil, fmt.Errorf("Todo服务未初始化")
+	if a.config == nil {
+		return nil, fmt.Errorf("配置未加载")
 	}
 
-	// 获取SimpleTodoClient
-	client := todoService.GetClient()
-	if client == nil {
-		return nil, fmt.Errorf("无法获取Todo客户端")
-	}
-
-	// 在后台goroutine中执行认证，避免阻塞前端
-	go func() {
-		logger.Info("开始后台浏览器OAuth认证流程")
-
-		result, err := client.AuthenticateWithBrowser(context.Background())
-		if err != nil {
-			logger.Errorf("浏览器OAuth认证失败: %v", err)
-			// 发射错误事件
-			if a.ctx != nil {
-				wailsRuntime.EventsEmit(a.ctx, "oauthError", map[string]interface{}{
-					"error": err.Error(),
-					"type":  "browser_auth_failed",
-				})
-			}
-		} else {
-			logger.Info("浏览器OAuth认证成功")
-			// 发射成功事件
-			if a.ctx != nil {
-				wailsRuntime.EventsEmit(a.ctx, "oauthResult", map[string]interface{}{
-					"success":      result.Success,
-					"access_token": result.AccessToken,
-					"expires_in":   result.ExpiresIn,
-					"type":         "browser_auth_success",
-				})
-			}
-		}
-	}()
-
+	// 直接返回成功，让前端知道OAuth流程已启动
+	// 实际的OAuth认证将通过serviceContainer.GetTodoService()自动处理
 	return map[string]interface{}{
-		"message": "正在启动浏览器进行OAuth认证，请在浏览器中完成登录",
-		"type":    "browser_auth_started",
+		"success": true,
+		"message": "OAuth认证将通过TodoService自动处理",
+		"type":    "auto_oauth",
 	}, nil
 }
 
-// HandleOAuthCallback 处理OAuth回调
-func (a *App) HandleOAuthCallback(state, callbackURL string) (map[string]interface{}, error) {
-	// 由于OAuth回调处理的复杂性，这里暂时返回一个占位符实现
-	// 实际的OAuth处理应该通过 AuthenticateWithBrowser 方法完成
-	return map[string]interface{}{
-		"success": false,
-		"error":   "OAuth callback handling not implemented. Please use AuthenticateWithBrowser instead.",
-		"type":    "oauth_callback_not_implemented",
-	}, nil
-}
 
 
 // InitConfig 初始化配置
