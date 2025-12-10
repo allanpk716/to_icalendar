@@ -20,6 +20,7 @@ import (
 	"github.com/allanpk716/to_icalendar/pkg/config"
 	"github.com/allanpk716/to_icalendar/pkg/logger"
 	"github.com/allanpk716/to_icalendar/pkg/models"
+	"github.com/allanpk716/to_icalendar/pkg/testing"
 	"github.com/getlantern/systray"
 	"gopkg.in/yaml.v3"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
