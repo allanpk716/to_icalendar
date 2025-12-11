@@ -1312,3 +1312,20 @@ func (c *SimpleTodoClient) GetTokenStatus() (*TokenStatus, error) {
 		TimeToExpiry:  timeToExpiry,
 	}, nil
 }
+
+// 公共方法：暴露 PKCE 生成功能供外部调用
+func (c *SimpleTodoClient) GeneratePKCE() (string, string) {
+	return c.generatePKCE()
+}
+
+// 公共方法：暴露授权码交换功能供外部调用
+func (c *SimpleTodoClient) ExchangeCodeForTokenWithPKCE(ctx context.Context, code, codeVerifier string) (string, error) {
+	return c.exchangeCodeForTokenWithPKCE(ctx, code, codeVerifier)
+}
+
+// 公共方法：生成随机 state 参数
+func (c *SimpleTodoClient) GenerateRandomState() string {
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}

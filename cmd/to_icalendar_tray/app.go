@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,6 +180,10 @@ type App struct {
 	quitOnce         sync.Once // 确保Quit只执行一次
 	quitWG           sync.WaitGroup // 等待清理完成
 	quitDone         chan struct{} // 退出完成信号
+	// OAuth 相关字段
+	oauthState       string          // OAuth state 参数
+	oauthCodeVerifier string         // PKCE code verifier
+	oauthMutex       sync.RWMutex    // OAuth 操作互斥锁
 }
 
 // NewApp 创建应用
@@ -681,16 +686,120 @@ func (a *App) StartBrowserOAuth() (map[string]interface{}, error) {
 		return nil, fmt.Errorf("配置未加载")
 	}
 
-	// 直接返回成功，让前端知道OAuth流程已启动
-	// 实际的OAuth认证将通过serviceContainer.GetTodoService()自动处理
+	a.oauthMutex.Lock()
+	defer a.oauthMutex.Unlock()
+
+	
+	// 获取 TodoService
+	todoService := a.serviceContainer.GetTodoService()
+	if todoService == nil {
+		return nil, fmt.Errorf("TodoService 未初始化")
+	}
+
+	// 获取 SimpleTodoClient
+	client := todoService.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("SimpleTodoClient 未初始化")
+	}
+
+	// 生成 PKCE 参数
+	codeVerifier, codeChallenge := client.GeneratePKCE()
+	a.oauthCodeVerifier = codeVerifier
+	a.oauthState = a.generateRandomState()
+
+	// 构建 OAuth URL
+	authURL := a.buildOAuthURL(codeChallenge, a.oauthState)
+
+	// 在系统浏览器中打开 OAuth URL
+	wailsRuntime.BrowserOpenURL(a.ctx, authURL)
+
+	
+	
+	// 发射事件通知前端 OAuth 已启动
+	wailsRuntime.EventsEmit(a.ctx, "oauthStarted", map[string]interface{}{
+		"message": "已在系统浏览器中打开OAuth授权页面",
+		"url":     authURL,
+	})
+
 	return map[string]interface{}{
 		"success": true,
-		"message": "OAuth认证将通过TodoService自动处理",
-		"type":    "auto_oauth",
+		"message": "已在系统浏览器中打开OAuth授权页面",
+		"type":    "system_browser",
 	}, nil
 }
 
+// ProcessOAuthCallback 处理手动输入的OAuth回调URL
+func (a *App) ProcessOAuthCallback(callbackURL string) (map[string]interface{}, error) {
+	a.oauthMutex.Lock()
+	defer a.oauthMutex.Unlock()
 
+	// 验证基本URL格式
+	if callbackURL == "" {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "回调URL不能为空",
+		}, nil
+	}
+
+	// 验证URL格式
+	parsedURL, err := url.Parse(callbackURL)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("解析URL失败: %v", err),
+		}, nil
+	}
+
+	// 验证回调URL域名
+	if parsedURL.Hostname() != "localhost" || parsedURL.Port() != "8080" || !strings.Contains(parsedURL.Path, "callback") {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "无效的回调URL，应该是 http://localhost:8080/callback",
+		}, nil
+	}
+
+	// 解析查询参数
+	queryParams := parsedURL.Query()
+
+	// 检查是否有错误参数
+	if errorParam := queryParams.Get("error"); errorParam != "" {
+		errorDesc := queryParams.Get("error_description")
+		fullError := errorParam
+		if errorDesc != "" {
+			fullError = fmt.Sprintf("%s: %s", errorParam, errorDesc)
+		}
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("授权失败: %s", fullError),
+		}, nil
+	}
+
+	// 获取授权码
+	code := queryParams.Get("code")
+	if code == "" {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "URL中未找到授权码",
+		}, nil
+	}
+
+	// 验证state参数
+	state := queryParams.Get("state")
+	if state != a.oauthState {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "State验证失败，可能存在安全风险，请重新开始授权流程",
+		}, nil
+	}
+
+	// 异步交换令牌
+	go a.exchangeToken(code)
+
+	return map[string]interface{}{
+		"success": true,
+		"message": "正在处理授权，请稍候...",
+	}, nil
+}
 
 // InitConfig 初始化配置
 func (a *App) InitConfig() string {
@@ -1028,4 +1137,139 @@ func (a *App) sendTestLog(level, message string) {
 
 	// 发送事件到前端
 	wailsRuntime.EventsEmit(a.ctx, "testLog", logMsg)
+}
+
+// OAuth 相关方法
+
+// buildOAuthURL 构建 OAuth 授权 URL
+func (a *App) buildOAuthURL(codeChallenge, state string) string {
+	if a.config == nil {
+		return ""
+	}
+
+	params := url.Values{}
+	params.Add("client_id", a.config.MicrosoftTodo.ClientID)
+	params.Add("response_type", "code")
+	params.Add("redirect_uri", "http://localhost:8080/callback")
+	params.Add("scope", "https://graph.microsoft.com/Tasks.ReadWrite https://graph.microsoft.com/User.Read offline_access")
+	params.Add("state", state)
+	params.Add("code_challenge", codeChallenge)
+	params.Add("code_challenge_method", "S256")
+
+	return fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/authorize?%s",
+		a.config.MicrosoftTodo.TenantID, params.Encode())
+}
+
+// generateRandomState 生成随机 state 参数
+func (a *App) generateRandomState() string {
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
+// handleOAuthNavigation 处理 BrowserWindow 导航事件
+func (a *App) handleOAuthNavigation(args ...interface{}) {
+	if len(args) < 1 {
+		return
+	}
+
+	navigationInfo, ok := args[0].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	urlStr, ok := navigationInfo["url"].(string)
+	if !ok {
+		return
+	}
+
+	// 检查是否是回调 URL
+	if strings.Contains(urlStr, "http://localhost:8080/callback") {
+		a.handleOAuthCallback(urlStr)
+	}
+}
+
+// handleOAuthCallback 处理 OAuth 回调
+func (a *App) handleOAuthCallback(callbackURL string) {
+	a.oauthMutex.Lock()
+	defer a.oauthMutex.Unlock()
+
+	
+	// 解析授权码
+	parsedURL, err := url.Parse(callbackURL)
+	if err != nil {
+		a.emitOAuthError(fmt.Sprintf("解析回调 URL 失败: %v", err))
+		return
+	}
+
+	code := parsedURL.Query().Get("code")
+	state := parsedURL.Query().Get("state")
+
+	// 验证 state
+	if state != a.oauthState {
+		a.emitOAuthError("OAuth state 验证失败")
+		return
+	}
+
+	if code == "" {
+		error := parsedURL.Query().Get("error")
+		if error != "" {
+			errorDesc := parsedURL.Query().Get("error_description")
+			if errorDesc != "" {
+				a.emitOAuthError(fmt.Sprintf("OAuth 授权失败: %s - %s", error, errorDesc))
+			} else {
+				a.emitOAuthError(fmt.Sprintf("OAuth 授权失败: %s", error))
+			}
+		} else {
+			a.emitOAuthError("未找到授权码")
+		}
+		return
+	}
+
+	// 交换访问令牌
+	go a.exchangeToken(code)
+}
+
+// exchangeToken 交换访问令牌
+func (a *App) exchangeToken(code string) {
+	if a.serviceContainer == nil {
+		a.emitOAuthError("服务容器未初始化")
+		return
+	}
+
+	todoService := a.serviceContainer.GetTodoService()
+	if todoService == nil {
+		a.emitOAuthError("TodoService 未初始化")
+		return
+	}
+
+	// 获取 SimpleTodoClient
+	client := todoService.GetClient()
+	if client == nil {
+		a.emitOAuthError("SimpleTodoClient 未初始化")
+		return
+	}
+
+	// 使用授权码交换访问令牌
+	token, err := client.ExchangeCodeForTokenWithPKCE(context.Background(), code, a.oauthCodeVerifier)
+
+	if err != nil {
+		a.emitOAuthError(fmt.Sprintf("令牌交换失败: %v", err))
+		return
+	}
+
+	// 发射成功事件
+	wailsRuntime.EventsEmit(a.ctx, "oauthResult", map[string]interface{}{
+		"success": true,
+		"token":   token,
+		"message": "OAuth 授权成功",
+	})
+}
+
+// emitOAuthError 发射 OAuth 错误事件
+func (a *App) emitOAuthError(errorMsg string) {
+	wailsRuntime.EventsEmit(a.ctx, "oauthResult", map[string]interface{}{
+		"success": false,
+		"error":   errorMsg,
+	})
 }

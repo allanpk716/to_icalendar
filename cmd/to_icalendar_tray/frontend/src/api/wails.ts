@@ -206,4 +206,22 @@ export class WailsAPI {
       }
     }
   }
+
+  // 处理手动输入的OAuth回调URL
+  static async ProcessOAuthCallback(callbackURL: string): Promise<WailsResponse<{
+    message: string
+  }>> {
+    try {
+      const result = await (window as any).go.main.App.ProcessOAuthCallback(callbackURL)
+      return {
+        success: true,
+        data: result
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: `处理回调URL失败: ${error}`
+      }
+    }
+  }
 }
