@@ -380,8 +380,24 @@ const submitCallbackURL = async () => {
     const result = await WailsAPI.ProcessOAuthCallback(callbackURL.value)
     if (result.success) {
       ElMessage.success('授权成功！')
-      emit('success', result)
-      closeDialog()
+
+      // 更新状态显示
+      statusTitle.value = '授权成功！'
+      statusMessage.value = 'Microsoft Todo授权已完成，正在保存令牌...'
+      progress.value = 100
+      progressStatus.value = 'success'
+      progressText.value = '授权成功，正在保存令牌'
+
+      // 延迟触发配置验证，确保token有足够时间保存到缓存文件
+      setTimeout(() => {
+        statusMessage.value = '令牌已保存，正在触发配置验证...'
+        emit('success', result)
+
+        // 再延迟1.5秒后自动关闭对话框
+        setTimeout(() => {
+          closeDialog()
+        }, 1500)
+      }, 2000) // 增加到2秒延迟
     } else {
       error.value = result.error || '授权失败'
     }
@@ -421,18 +437,23 @@ const handleOAuthResult = (result: any) => {
 
   if (result.success) {
     statusTitle.value = '授权成功！'
-    statusMessage.value = 'Microsoft Todo授权已完成，正在返回...'
+    statusMessage.value = 'Microsoft Todo授权已完成，正在保存令牌...'
     progress.value = 100
     progressStatus.value = 'success'
-    progressText.value = '授权成功'
+    progressText.value = '授权成功，正在保存令牌'
 
     ElMessage.success('Microsoft账户授权成功！')
-    emit('success', result)
 
-    // 1.5秒后自动关闭对话框
+    // 延迟触发配置验证，确保token有足够时间保存到缓存文件
     setTimeout(() => {
-      closeDialog()
-    }, 1500)
+      statusMessage.value = '令牌已保存，正在触发配置验证...'
+      emit('success', result)
+
+      // 再延迟1.5秒后自动关闭对话框
+      setTimeout(() => {
+        closeDialog()
+      }, 1500)
+    }, 2000) // 增加到2秒延迟
   } else {
     error.value = result.error || result.error_description || '授权失败'
     statusTitle.value = '授权失败'
