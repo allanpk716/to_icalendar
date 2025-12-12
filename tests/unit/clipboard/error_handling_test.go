@@ -11,8 +11,7 @@ import (
 // TestClipboardService_EmptyClipboard 测试空剪贴板的错误处理
 func TestClipboardService_EmptyClipboard(t *testing.T) {
 	// 创建剪贴板服务实例
-	logger := &mockLogger{}
-	service := services.NewClipboardService(logger)
+	service := services.NewClipboardService()
 
 	// 测试读取空剪贴板
 	ctx := context.Background()
@@ -39,7 +38,7 @@ func TestClipboardService_EmptyClipboard(t *testing.T) {
 func TestClipboardService_ProcessEmptyContent(t *testing.T) {
 	// 创建剪贴板服务实例
 	logger := &mockLogger{}
-	service := services.NewClipboardService(logger)
+	service := services.NewClipboardService()
 
 	// 测试处理空内容
 	ctx := context.Background()
@@ -61,7 +60,7 @@ func TestClipboardService_ProcessEmptyContent(t *testing.T) {
 func TestClipboardService_ValidContentProcessing(t *testing.T) {
 	// 创建剪贴板服务实例
 	logger := &mockLogger{}
-	service := services.NewClipboardService(logger)
+	service := services.NewClipboardService()
 
 	// 创建测试内容
 	testContent := &models.ClipboardContent{
@@ -96,7 +95,7 @@ func TestClipboardService_ValidContentProcessing(t *testing.T) {
 func TestClipboardService_HasContent(t *testing.T) {
 	// 创建剪贴板服务实例
 	logger := &mockLogger{}
-	service := services.NewClipboardService(logger)
+	service := services.NewClipboardService()
 
 	// 测试检查剪贴板内容
 	hasContent, err := service.HasContent()
@@ -116,7 +115,7 @@ func TestClipboardService_HasContent(t *testing.T) {
 func TestClipboardService_GetContentType(t *testing.T) {
 	// 创建剪贴板服务实例
 	logger := &mockLogger{}
-	service := services.NewClipboardService(logger)
+	service := services.NewClipboardService()
 
 	// 测试获取内容类型
 	contentType, err := service.GetContentType()

@@ -49,7 +49,7 @@ func (sc *ServiceContainer) initializeServices() {
 	sc.cleanupService = NewCleanupService(sc.cacheManager)
 
 	// 初始化剪贴板服务
-	sc.clipboardService = services.NewClipboardService(sc.logger)
+	sc.clipboardService = services.NewClipboardService()
 
 	// 初始化 Todo 服务（延迟初始化）
 	sc.todoService = nil

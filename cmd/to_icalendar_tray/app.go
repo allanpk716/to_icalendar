@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -179,6 +180,7 @@ type App struct {
 	isQuitting       bool   // 退出状态跟踪
 	quitOnce         sync.Once // 确保Quit只执行一次
 	quitWG           sync.WaitGroup // 等待清理完成
+	clipboardMutex   sync.Mutex // 剪贴板访问互斥锁
 	quitDone         chan struct{} // 退出完成信号
 	// OAuth 相关字段
 	oauthState       string          // OAuth state 参数
@@ -400,6 +402,10 @@ func (a *App) GetConfigStatus() map[string]interface{} {
 
 // GetClipboardBase64 获取剪贴板图片的base64编码
 func (a *App) GetClipboardBase64() (string, error) {
+	// 添加剪贴板访问互斥锁保护
+	a.clipboardMutex.Lock()
+	defer a.clipboardMutex.Unlock()
+
 	// 使用CLI版本的剪贴板服务
 	if a.serviceContainer == nil {
 		if err := a.InitializeServiceContainer(); err != nil {
@@ -407,18 +413,56 @@ func (a *App) GetClipboardBase64() (string, error) {
 		}
 	}
 
+	// 获取剪贴板服务
 	clipboardService := a.serviceContainer.GetClipboardService()
 
-	content, err := clipboardService.ReadContent(a.ctx)
-	if err != nil {
-		return "", fmt.Errorf("读取剪贴板失败: %w", err)
-	}
+	// 使用通道和独立 goroutine 来处理剪贴板读取
+	// 这样可以更好地控制线程
+	resultChan := make(chan struct {
+		content *models.ClipboardContent
+		err     error
+	}, 1)
 
-	if content.Type != models.ContentTypeImage {
-		return "", fmt.Errorf("剪贴板中没有图片内容")
-	}
+	// 在新的 goroutine 中运行剪贴板读取
+	go func() {
+		// 锁定到 OS 线程，确保剪贴板 API 调用在正确的线程上下文中
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 
-	return base64.StdEncoding.EncodeToString(content.Image), nil
+		// 短暂延迟，确保线程切换完成
+		time.Sleep(10 * time.Millisecond)
+
+		content, err := clipboardService.ReadContent(a.ctx)
+		resultChan <- struct {
+			content *models.ClipboardContent
+			err     error
+		}{content, err}
+	}()
+
+	// 等待结果，带超时
+	select {
+	case result := <-resultChan:
+		if result.err != nil {
+			// 提供更友好的错误提示和解决建议
+			errorMsg := result.err.Error()
+			if strings.Contains(errorMsg, "no readable content found") {
+				return "", fmt.Errorf("剪贴板中没有可读取的图片内容。\n\n解决建议：\n1. 确保已完成截图操作（如使用Snipaste、微信截图等）\n2. 检查剪贴板中是否有图片内容\n3. 等待截图完成后再点击获取按钮\n4. 尝试重新截图")
+			} else if strings.Contains(errorMsg, "剪贴板被锁定") || strings.Contains(errorMsg, "Thread does not have a clipboard open") {
+				return "", fmt.Errorf("剪贴板访问出现问题。这通常是由于Windows剪贴板的线程限制。\n\n解决建议：\n1. 稍等片刻后重试\n2. 确保没有其他程序正在使用剪贴板\n3. 尝试重新截图\n4. 重启应用程序")
+			} else {
+				return "", fmt.Errorf("读取剪贴板失败: %w", result.err)
+			}
+		}
+
+		if result.content.Type != models.ContentTypeImage {
+			return "", fmt.Errorf("剪贴板中的内容不是图片。\n\n当前内容类型：%s\n\n解决建议：\n1. 确保复制的是图片而不是文本\n2. 重新进行截图操作\n3. 尝试复制图片文件", result.content.Type)
+		}
+
+		return base64.StdEncoding.EncodeToString(result.content.Image), nil
+
+	case <-time.After(5 * time.Second):
+		return "", fmt.Errorf("剪贴板操作超时。这可能是由于系统资源紧张或剪贴板被其他程序占用。\n\n解决建议：\n1. 稍等片刻后重试\n2. 关闭其他可能使用剪贴板的程序\n3. 重启应用程序")
+	}
 }
 
 // StartProcessImageToTodo 开始异步处理图片到Todo

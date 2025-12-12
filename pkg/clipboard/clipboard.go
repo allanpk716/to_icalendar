@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -145,6 +147,7 @@ type BITMAPV5HEADER struct {
 
 // WindowsClipboardReader implements Reader interface for Windows platform
 type WindowsClipboardReader struct {
+	mu            sync.RWMutex
 	normalizer    *image.ImageNormalizer
 	configManager *image.ConfigManager
 }
@@ -258,6 +261,7 @@ func (r *WindowsClipboardReader) getClipboardSequenceNumber() uint32 {
 	return uint32(seq)
 }
 
+
 // isClipboardLocked 检查剪贴板是否被其他进程占用
 func (r *WindowsClipboardReader) isClipboardLocked() bool {
 	openWindow := r.getOpenClipboardWindow()
@@ -308,6 +312,17 @@ func (r *WindowsClipboardReader) waitForClipboardAvailable(policy ClipboardRetry
 
 // openClipboardWithRetry 智能打开剪贴板，包含重试机制
 func (r *WindowsClipboardReader) openClipboardWithRetry(policy ClipboardRetryPolicy) error {
+	var isOpen bool
+
+	// 使用 defer 确保在任何情况下都关闭剪贴板
+	defer func() {
+		if isOpen {
+			if ret, _, _ := procCloseClipboard.Call(); ret == 0 {
+				logger.Warnf("关闭剪贴板失败，可能已被其他进程关闭")
+			}
+		}
+	}()
+
 	// 首先检查剪贴板是否被占用
 	if r.isClipboardLocked() {
 		if err := r.waitForClipboardAvailable(policy); err != nil {
@@ -318,7 +333,8 @@ func (r *WindowsClipboardReader) openClipboardWithRetry(policy ClipboardRetryPol
 	// 尝试打开剪贴板
 	ret, _, err := procOpenClipboard.Call(0)
 	if ret != 0 {
-		return nil // 成功打开
+		isOpen = true // 标记剪贴板已打开
+		return nil    // 成功打开
 	}
 
 	// 分析错误原因
@@ -338,6 +354,7 @@ func (r *WindowsClipboardReader) openClipboardWithRetry(policy ClipboardRetryPol
 		if ret == 0 {
 			return fmt.Errorf("重试后仍无法打开剪贴板: %v", err)
 		}
+		isOpen = true // 标记剪贴板已打开
 		return nil
 
 	case ERROR_CLIPBOARD_LOCKED:
@@ -350,6 +367,9 @@ func (r *WindowsClipboardReader) openClipboardWithRetry(policy ClipboardRetryPol
 
 // ReadText reads text content from clipboard
 func (r *WindowsClipboardReader) ReadText() (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	text, err := clipboard.ReadAll()
 	if err != nil {
 		return "", fmt.Errorf("failed to read text from clipboard: %w", err)
@@ -364,31 +384,26 @@ func (r *WindowsClipboardReader) ReadText() (string, error) {
 
 // ReadImage reads image data from clipboard using Windows API with intelligent retry mechanism
 func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
-	// 记录剪贴板序列号用于调试
-	initialSeq := r.getClipboardSequenceNumber()
-	logger.Debugf("开始读取剪贴板图片，序列号: %d", initialSeq)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	// 使用智能重试策略打开剪贴板
-	policy := DefaultRetryPolicy
-	err := r.openClipboardWithRetry(policy)
-	if err != nil {
-		return nil, fmt.Errorf("无法打开剪贴板: %w", err)
-	}
-	defer procCloseClipboard.Call()
+	// 在方法开始就锁定线程，确保整个操作在同一个线程执行
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
-	// 验证剪贴板内容是否发生了变化（可选调试信息）
-	finalSeq := r.getClipboardSequenceNumber()
-	if finalSeq != initialSeq {
-		logger.Debugf("剪贴板内容已变化，序列号: %d -> %d", initialSeq, finalSeq)
-	}
+	// 使用原子性操作，避免复杂的重试机制和 defer 关闭剪贴板
+	return r.readImageAtomic()
+}
 
-	// 检测各种图片格式，优化检测顺序以适应Snipaste等截图工具
+// readAllFormatsDirect 直接读取所有支持的格式，不使用复杂的重试机制
+func (r *WindowsClipboardReader) readAllFormatsDirect() ([]byte, error) {
+	// 定义图片格式，按优先级排序
 	imageFormats := []struct {
 		format   uintptr
 		name     string
 		priority int
 	}{
-		{CF_DIBV5, "CF_DIBV5", 1},      // Remote Desktop format (最高优先级，常用于远程桌面和高级截图工具)
+		{CF_DIBV5, "CF_DIBV5", 1},      // Remote Desktop format (最高优先级)
 		{CF_DIB, "CF_DIB", 2},           // Standard DIB format (Snipaste常用格式)
 		{CF_BITMAP, "CF_BITMAP", 3},     // Bitmap format (兼容性格式)
 		{CF_ENHMETAFILE, "CF_ENHMETAFILE", 4}, // Enhanced metafile (矢量图格式)
@@ -398,51 +413,189 @@ func (r *WindowsClipboardReader) ReadImage() ([]byte, error) {
 	for _, fmt := range imageFormats {
 		ret, _, _ := procIsClipboardFormatAvailable.Call(fmt.format)
 		if ret != 0 {
-			logger.Debugf("检测到图片格式: %s (优先级: %d)", fmt.name, fmt.priority)
+			logger.Debugf("检测到图片格式: %s", fmt.name)
 
-			// 为特定格式添加额外的等待时间（特别是DIB格式）
-			if fmt.format == CF_DIB || fmt.format == CF_DIBV5 {
-				logger.Debugf("为 %s 格式添加额外等待时间以允许数据完全就绪", fmt.name)
-				time.Sleep(10 * time.Millisecond) // 短暂等待确保数据完全写入
+			// 直接获取剪贴板数据
+			handle, _, err := procGetClipboardData.Call(fmt.format)
+			if handle != 0 {
+				// 处理数据
+				imageData, err := r.processImageData(handle, fmt.format, fmt.name)
+				if err != nil {
+					logger.Warnf("读取 %s 格式失败: %v，尝试下一种格式", fmt.name, err)
+					continue
+				}
+				return imageData, nil
+			} else {
+				logger.Warnf("获取 %s 格式数据失败: %v", fmt.name, err)
 			}
-
-			imageData, err := r.readImageByFormat(fmt.format, fmt.name)
-			if err != nil {
-				logger.Warnf("读取 %s 格式失败: %v，尝试下一种格式", fmt.name, err)
-				continue
-			}
-			return imageData, nil
 		}
 	}
 
-	// 如果标准格式失败，尝试 CF_HDROP 格式 (文件拖拽)
+	// 如果标准格式失败，尝试特殊格式
+	// 尝试 CF_HDROP 格式 (文件拖拽)
 	logger.Info("标准图片格式检测失败，尝试文件格式 (CF_HDROP)...")
-	if imageData, err := r.tryHDropFormat(); err == nil {
+	if imageData, err := r.tryHDropFormatDirect(); err == nil {
 		return imageData, nil
 	} else {
 		logger.Debugf("CF_HDROP 格式检测失败: %v", err)
 	}
 
-	// 如果标准格式失败，尝试 MSTSC 特定格式 (远程桌面)
+	// 尝试 MSTSC 特定格式 (远程桌面)
 	logger.Info("文件格式检测失败，尝试 MSTSC 特定格式...")
-	if imageData, err := r.tryMSTSCFormats(); err == nil {
+	if imageData, err := r.tryMSTSCFormatsDirect(); err == nil {
 		return imageData, nil
 	} else {
 		logger.Debugf("MSTSC 格式检测失败: %v", err)
 	}
 
-	// 枚举所有可用格式用于调试
-	r.enumClipboardFormats()
+	// 所有格式都失败
+	return nil, fmt.Errorf("剪贴板中没有支持的图片数据")
+}
 
-	// 提供更详细的错误信息并记录诊断信息
-	owner := r.getClipboardOwner()
-	logger.Debugf("剪贴板所有者窗口: 0x%X", owner)
+// processImageData 处理图片数据的通用方法
+func (r *WindowsClipboardReader) processImageData(handle, format uintptr, formatName string) ([]byte, error) {
+	// 锁定全局内存
+	pointer, _, err := procGlobalLock.Call(handle)
+	if pointer == 0 {
+		return nil, fmt.Errorf("failed to lock global memory for %s: %v", formatName, err)
+	}
+	defer procGlobalUnlock.Call(handle)
 
-	// 记录详细的诊断信息帮助调试
-	logger.Warn("剪贴板图片读取失败，记录诊断信息...")
-	r.LogDiagnosticInfo()
+	// 获取数据大小
+	size, _, err := procGlobalSize.Call(handle)
+	if size == 0 {
+		return nil, fmt.Errorf("failed to get global memory size for %s: %v", formatName, err)
+	}
 
-	return nil, fmt.Errorf("剪贴板中没有支持的图片数据 (序列号: %d)", finalSeq)
+	logger.Debugf("开始读取 %s 格式图片，数据大小: %d bytes", formatName, size)
+
+	switch format {
+	case CF_DIBV5:
+		return r.processDIBV5Data(pointer, size)
+	case CF_DIB:
+		return r.processDIBData(pointer, size)
+	case CF_BITMAP:
+		return r.processBitmapData(handle, pointer, size)
+	case CF_ENHMETAFILE:
+		return r.processEnhMetafileData(handle, pointer, size)
+	default:
+		return nil, fmt.Errorf("unsupported format: %s", formatName)
+	}
+}
+
+// tryHDropFormatDirect 尝试 CF_HDROP 格式
+func (r *WindowsClipboardReader) tryHDropFormatDirect() ([]byte, error) {
+	ret, _, _ := procIsClipboardFormatAvailable.Call(CF_HDROP)
+	if ret == 0 {
+		return nil, fmt.Errorf("CF_HDROP format not available")
+	}
+
+	// 获取剪贴板数据句柄
+	handle, _, err := procGetClipboardData.Call(CF_HDROP)
+	if handle == 0 {
+		return nil, fmt.Errorf("failed to get clipboard data for CF_HDROP: %v", err)
+	}
+
+	// 锁定全局内存
+	pointer, _, err := procGlobalLock.Call(handle)
+	if pointer == 0 {
+		return nil, fmt.Errorf("failed to lock global memory for CF_HDROP: %v", err)
+	}
+	defer procGlobalUnlock.Call(handle)
+
+	// 获取数据大小
+	size, _, err := procGlobalSize.Call(handle)
+	if size == 0 {
+		return nil, fmt.Errorf("failed to get global memory size for CF_HDROP: %v", err)
+	}
+
+	logger.Debugf("开始读取 CF_HDROP 数据，大小: %d bytes", size)
+
+	// 读取原始数据
+	data := make([]byte, size)
+	copy(data, (*[1 << 30]byte)(unsafe.Pointer(pointer))[:size:size])
+
+	// HDROP 格式处理图片文件
+	// TODO: 实现 CF_HDROP 格式的图片文件处理
+	return nil, fmt.Errorf("CF_HDROP format not yet implemented in direct mode")
+}
+
+// tryMSTSCFormatsDirect 尝试 MSTSC 特定格式
+func (r *WindowsClipboardReader) tryMSTSCFormatsDirect() ([]byte, error) {
+	// MSTSC 格式列表
+	mstscFormats := []struct {
+		format uintptr
+		name   string
+	}{
+		{CF_TEXT, "CF_TEXT"},
+		{CF_UNICODETEXT, "CF_UNICODETEXT"},
+	}
+
+	for _, fmt := range mstscFormats {
+		ret, _, _ := procIsClipboardFormatAvailable.Call(fmt.format)
+		if ret != 0 {
+			logger.Debugf("检测到 MSTSC 格式: %s", fmt.name)
+
+			// 获取剪贴板数据句柄
+			handle, _, _ := procGetClipboardData.Call(fmt.format)
+			if handle != 0 {
+				// 读取数据
+				data, err := r.readMSTSCFormatDataDirect(handle, fmt.name)
+				if err != nil {
+					logger.Warnf("读取 MSTSC 格式 %s 失败: %v", fmt.name, err)
+					continue
+				}
+				return data, nil
+			} else {
+				logger.Debugf("无法获取 MSTSC 格式 %s 数据", fmt.name)
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("MSTSC 格式检测失败")
+}
+
+// readMSTSCFormatDataDirect 直接读取 MSTSC 格式数据
+func (r *WindowsClipboardReader) readMSTSCFormatDataDirect(handle uintptr, formatName string) ([]byte, error) {
+	// 锁定全局内存
+	pointer, _, err := procGlobalLock.Call(handle)
+	if pointer == 0 {
+		return nil, fmt.Errorf("failed to lock global memory for %s: %v", formatName, err)
+	}
+	defer procGlobalUnlock.Call(handle)
+
+	// 获取数据大小
+	size, _, err := procGlobalSize.Call(handle)
+	if size == 0 {
+		return nil, fmt.Errorf("failed to get global memory size for %s: %v", formatName, err)
+	}
+
+	logger.Debugf("开始读取 MSTSC 格式 %s，数据大小: %d bytes", formatName, size)
+
+	// 读取原始数据
+	data := make([]byte, size)
+	copy(data, (*[1 << 30]byte)(unsafe.Pointer(pointer))[:size:size])
+
+	// MSTSC 格式处理文本数据
+	// TODO: 实现 MSTSC 格式的文本数据处理
+	return nil, fmt.Errorf("MSTSC format not yet implemented in direct mode")
+}
+
+// readImageAtomic 原子性地执行所有剪贴板操作，确保在同一线程连续执行
+func (r *WindowsClipboardReader) readImageAtomic() ([]byte, error) {
+	// 打开剪贴板
+	ret, _, err := procOpenClipboard.Call(0)
+	if ret == 0 {
+		return nil, fmt.Errorf("无法打开剪贴板: %w", err)
+	}
+
+	// 立即执行所有操作，不让调度器介入
+	imageData, err := r.readAllFormatsDirect()
+
+	// 立即关闭剪贴板（不使用 defer）
+	procCloseClipboard.Call()
+
+	return imageData, err
 }
 
 // readImageByFormat reads image data based on specific format
@@ -1072,13 +1225,42 @@ func (r *WindowsClipboardReader) enumClipboardFormats() {
 	}
 }
 
+// enumClipboardFormatsForError 返回剪贴板格式列表用于错误诊断
+func (r *WindowsClipboardReader) enumClipboardFormatsForError() []uintptr {
+	var formats []uintptr
+	format := uintptr(0)
+
+	for {
+		nextFormat, _, _ := procEnumClipboardFormats.Call(format)
+		if nextFormat == 0 {
+			break
+		}
+		formats = append(formats, nextFormat)
+		format = nextFormat
+
+		// 限制数量避免过多
+		if len(formats) >= 20 {
+			break
+		}
+	}
+
+	return formats
+}
+
 // HasContent checks if clipboard has any readable content
 func (r *WindowsClipboardReader) HasContent() (bool, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	// First check for image content using Windows API
 	// This is more reliable than checking text first, as text checking may miss images
 	ret, _, err := procOpenClipboard.Call(0)
 	if ret != 0 {
-		defer procCloseClipboard.Call()
+		defer func() {
+			if ret, _, _ := procCloseClipboard.Call(); ret == 0 {
+				logger.Warnf("关闭剪贴板失败，可能已被其他进程关闭")
+			}
+		}()
 
 		// Check all supported image formats
 		imageFormats := []uintptr{CF_DIBV5, CF_DIB, CF_BITMAP, CF_ENHMETAFILE, CF_HDROP}
@@ -1102,10 +1284,17 @@ func (r *WindowsClipboardReader) HasContent() (bool, error) {
 
 // GetContentType determines the type of content in clipboard
 func (r *WindowsClipboardReader) GetContentType() (models.ContentType, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	// First check for image content using Windows API
 	ret, _, err := procOpenClipboard.Call(0)
 	if ret != 0 {
-		defer procCloseClipboard.Call()
+		defer func() {
+			if ret, _, _ := procCloseClipboard.Call(); ret == 0 {
+				logger.Warnf("关闭剪贴板失败，可能已被其他进程关闭")
+			}
+		}()
 
 		// Check all supported image formats
 		imageFormats := []uintptr{CF_DIBV5, CF_DIB, CF_BITMAP, CF_ENHMETAFILE, CF_HDROP}
@@ -1130,6 +1319,8 @@ func (r *WindowsClipboardReader) GetContentType() (models.ContentType, error) {
 
 // Read reads any available content from clipboard
 func (r *WindowsClipboardReader) Read() (*models.ClipboardContent, error) {
+	// Note: Don't lock here because ReadImage and ReadText have their own locking
+	// Locking here would cause deadlock when calling those methods
 	content := &models.ClipboardContent{
 		Metadata: make(map[string]interface{}),
 	}
